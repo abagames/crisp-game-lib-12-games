@@ -1,6 +1,7 @@
 declare let title: string;
 declare let description: string;
 declare let characters: string[];
+declare let audioFiles: { [key: string]: string };
 declare type ThemeName =
   | "simple"
   | "pixel"
@@ -13,6 +14,7 @@ declare type Options = {
   isCapturing?: boolean;
   isCapturingGameCanvasOnly?: boolean;
   captureCanvasScale?: number;
+  captureDurationSec?: number;
   isShowingScore?: boolean;
   isShowingTime?: boolean;
   isReplayEnabled?: boolean;
@@ -27,6 +29,18 @@ declare type Options = {
   seed?: number;
   audioVolume?: number;
   theme?: ThemeName;
+  colorPalette?: number[][];
+  textEdgeColor?: {
+    score?: Color;
+    floatingScore?: Color;
+    title?: Color;
+    description?: Color;
+    gameOver?: Color;
+  };
+  bgmName?: string;
+  bgmVolume?: number;
+  audioTempo?: number;
+  isRecording?: boolean;
 };
 declare let options: Options;
 declare function update(): void;
@@ -66,7 +80,7 @@ declare type Color =
   | "light_purple"
   | "light_cyan"
   | "light_black";
-declare function color(colorName: Color): void;
+declare function color(colorNameOrColorIndex: Color | number): void;
 
 // Draw functions return a collision info.
 type Collision = {
@@ -192,6 +206,7 @@ declare type LetterOptions = {
   mirror?: { x?: 1 | -1; y?: 1 | -1 };
   scale?: { x?: number; y?: number };
   isSmallText?: boolean;
+  edgeColor?: Color;
 };
 
 declare function text(
@@ -229,6 +244,7 @@ declare function particle(
     speed?: number;
     angle?: number;
     angleWidth?: number;
+    edgeColor?: Color;
   }
 ): void;
 declare function particle(
@@ -238,6 +254,7 @@ declare function particle(
     speed?: number;
     angle?: number;
     angleWidth?: number;
+    edgeColor?: Color;
   }
 ): void;
 declare function particle(
@@ -515,7 +532,7 @@ declare type SoundEffectType =
   | "synth"
   | "tone";
 declare function play(
-  type: SoundEffectType,
+  type: SoundEffectType | string,
   options?: {
     seed?: number;
     numberOfSounds?: number;
