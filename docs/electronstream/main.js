@@ -4,16 +4,16 @@ description = `
 [Hold] Go up
 `;
 
-characters = ["./tmp/images/background.png"];
+characters = ["./electronstream/images/background.png"];
 
 audioFiles = {
-  bgm: "./tmp/audios/bgm.mp3",
-  coin: "./tmp/audios/coin.mp3",
-  crush: "./tmp/audios/crush.mp3",
-  jump: "./tmp/audios/jump.mp3",
-  start: "./tmp/audios/start.mp3",
-  warp_rl: "./tmp/audios/warp_rl.mp3",
-  warp_ud: "./tmp/audios/warp_ud.mp3",
+  bgm: "./electronstream/audios/bgm.mp3",
+  coin: "./electronstream/audios/coin.mp3",
+  crush: "./electronstream/audios/crush.mp3",
+  jump: "./electronstream/audios/jump.mp3",
+  start: "./electronstream/audios/start.mp3",
+  warp_rl: "./electronstream/audios/warp_rl.mp3",
+  warp_ud: "./electronstream/audios/warp_ud.mp3",
 };
 
 options = {
