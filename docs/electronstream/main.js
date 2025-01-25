@@ -21,13 +21,14 @@ options = {
   isPlayingBgm: true,
   isReplayEnabled: true,
   isDrawingScoreFront: true,
+  isDrawingParticleFront: true,
   bgmVolume: 2,
   audioTempo: 150,
   textEdgeColor: { title: "light_yellow" },
 };
 
 // Define variables for game objects
-/** @type {{pos: Vector, vel: Vector}} */
+/** @type {{pos: Vector, vel: Vector, damagedTicks: number}} */
 let electronStream;
 /** @type {{pos: Vector, vel: Vector, dir: number}[]} */
 let reverseCurrents;
@@ -43,6 +44,7 @@ function update() {
     electronStream = {
       pos: vec(10, 50),
       vel: vec(1, 0),
+      damagedTicks: 0,
     };
     reverseCurrents = [
       {
@@ -101,6 +103,18 @@ function update() {
   // Draw electron stream
   color("cyan");
   bar(electronStream.pos, streamLength, 3, electronStream.vel.angle);
+  if (streamLength < 8) {
+    const damage = 9 - streamLength;
+    electronStream.damagedTicks++;
+    const damagedDuration = 50 - damage * 7;
+    if (electronStream.damagedTicks > damagedDuration) {
+      electronStream.damagedTicks = 0;
+    }
+    if (electronStream.damagedTicks < damagedDuration / 2) {
+      color("purple");
+      bar(electronStream.pos, streamLength, 3, electronStream.vel.angle);
+    }
+  }
 
   // Spawn and update reverse currents
   nextCurrentSpawnDist -= sd;
@@ -146,8 +160,8 @@ function update() {
     const c = box(rc.pos, 2).isColliding.rect;
     if (c.cyan) {
       // Game over on collision with electron stream
-      color("purple");
-      bar(electronStream.pos, streamLength, 5, electronStream.vel.angle);
+      color("blue");
+      particle(electronStream.pos, { count: 3, speed: 2, edgeColor: "purple" });
       multiplier--;
       if (multiplier < 1) {
         multiplier = 1;
