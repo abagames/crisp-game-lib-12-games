@@ -1989,6 +1989,16 @@ lll
      * ```
      * Pixel arts are assigned from 'a'. `char("a", 0, 0)` draws the character
      * defined by the first element of the `characters` array.
+     *
+     * `characters` array can also specify external image files as corresponding pixel art.
+     * ```js
+     * characters = [
+     * "./jugglingchain/images/background.png",
+     * "./jugglingchain/images/ball.png",
+     * "./jugglingchain/images/arrow.png",
+     * ]
+     * ```
+     *
      * @param str
      * @param x
      * @param y
@@ -2067,7 +2077,7 @@ lll
         for (let i = 0; i < str.length; i++) {
             if (i === 0) {
                 const cca = str.charCodeAt(0);
-                if (cca < 0x20 || cca > 0x7e) {
+                if (cca < 0x21 || cca > 0x7e) {
                     px = Math.floor(px - (letterSize / 2) * options.scale.x);
                     py = Math.floor(py - (letterSize / 2) * options.scale.y);
                 }
@@ -3695,6 +3705,12 @@ lll
      * Set the color for drawing rectangles, particles, texts, and characters.
      * Setting the color prior to `char()` will recolor the pixel art.
      * Use color("black") to restore and use the original colors.
+     *
+     * When you specify a custom color palette, you can designate colors using
+     * the index of that palette.
+     * When color names like "red", "yellow" etc. are specified as arguments to
+     * the `color()` function, it assigns the closest color from the color palette to
+     * the original color.
      * @param colorName
      */
     function color(colorNameOrColorIndex) {
@@ -3741,6 +3757,16 @@ lll
     }
     /**
      * Play a sound effect.
+     * Specify in the type argument either a type defined in SoundEffectType or
+     * a type defined in correspondence with external sound files in `audioFiles`.
+     * ```js
+     * audioFiles = {
+     * bgm: "./jugglingchain/audios/bgm.mp3",
+     * tap: "./jugglingchain/audios/tap.mp3",
+     * crush: "./jugglingchain/audios/crush.mp3",
+     * };
+     * ```
+     *
      * @param type
      * @param options
      * @param options.seed Random seed (default = 0)
@@ -3768,11 +3794,12 @@ lll
      */
     /** @ignore */
     function playBgm() {
-        if (isBgmAudioFileReady) {
-            playAudioFile(currentOptions.bgmName, currentOptions.bgmVolume);
-        }
+        if (isBgmAudioFileReady &&
+            playAudioFile(currentOptions.bgmName, currentOptions.bgmVolume)) ;
         else if (typeof sss.generateMml === "function") {
-            bgmTrack = sss.playMml(sss.generateMml());
+            bgmTrack = sss.playMml(sss.generateMml(), {
+                volume: currentOptions.bgmVolume,
+            });
         }
         else {
             sss.playBgm();
