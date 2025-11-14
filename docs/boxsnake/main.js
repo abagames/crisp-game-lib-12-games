@@ -10,7 +10,7 @@ options = {
   theme: "pixel",
   isPlayingBgm: true,
   isReplayEnabled: true,
-  audioSeed: 0,
+  audioSeed: 4,
 };
 
 const boxPadding = 9;

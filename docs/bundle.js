@@ -230,7 +230,7 @@
         0xeeeeee, 0xe91e63, 0x4caf50, 0xffc107, 0x3f51b5, 0x9c27b0, 0x03a9f4,
         0x616161,
     ];
-    function init$8(isDarkColor, colorPalette) {
+    function init$9(isDarkColor, colorPalette) {
         const [wr, wb, wg] = getRgb(0, isDarkColor);
         values = fromEntities(colors.map((c, i) => {
             if (i < 1) {
@@ -312,17 +312,37 @@
         return [(n & 0xff0000) >> 16, (n & 0xff00) >> 8, n & 0xff];
     }
     function colorToNumber(color, ratio = 1) {
-        const v = typeof color == "number" ? colorPaletteValues[color] : values[color];
+        const v = resolveColorValue(color);
         return ((Math.floor(v.r * ratio) << 16) |
             (Math.floor(v.g * ratio) << 8) |
             Math.floor(v.b * ratio));
     }
     function colorToStyle(color, ratio = 1) {
-        const v = typeof color == "number" ? colorPaletteValues[color] : values[color];
+        const v = resolveColorValue(color);
         const r = Math.floor(v.r * ratio);
         const g = Math.floor(v.g * ratio);
         const b = Math.floor(v.b * ratio);
         return v.a < 1 ? `rgba(${r},${g},${b},${v.a})` : `rgb(${r},${g},${b})`;
+    }
+    function resolveColorValue(color) {
+        if (typeof color === "number") {
+            if (colorPaletteValues == null) {
+                throw new Error(`color(${color}) is invalid because no custom color palette is defined.`);
+            }
+            const paletteColor = colorPaletteValues[color];
+            if (paletteColor == null) {
+                throw new Error(`color(${color}) is out of bounds for the current color palette (length: ${colorPaletteValues.length}).`);
+            }
+            return paletteColor;
+        }
+        if (values == null) {
+            throw new Error(`color("${color}") was used before the color system was initialized.`);
+        }
+        const namedColor = values[color];
+        if (namedColor == null) {
+            throw new Error(`Unknown color "${color}". Supported colors: ${colors.join(", ")}.`);
+        }
+        return namedColor;
     }
 
     const gridFilterFragment = `
@@ -366,7 +386,7 @@ void main(void) {
     let isFilling = false;
     let theme;
     let crtFilter;
-    function init$7(_size, _bodyBackground, _viewBackground, isCapturing, isCapturingGameCanvasOnly, captureCanvasScale, captureDurationSec, _theme) {
+    function init$8(_size, _bodyBackground, _viewBackground, isCapturing, isCapturingGameCanvasOnly, captureCanvasScale, captureDurationSec, _theme) {
         size.set(_size);
         theme = _theme;
         viewBackground = _viewBackground;
@@ -2014,7 +2034,7 @@ lll
                 return print(str, x, y, Object.assign({ isCharacter, isCheckingCollision: true, color: currentColor }, options));
             }
             else {
-                throw "invalid params";
+                throw new Error(`${isCharacter ? "char" : "text"}(): expected numeric y when x is a number.`);
             }
         }
         else {
@@ -2035,7 +2055,7 @@ lll
     let letterContext;
     let scaledLetterCanvas;
     let scaledLetterContext;
-    const defaultOptions$4 = {
+    const defaultOptions$3 = {
         color: "black",
         backgroundColor: "transparent",
         rotation: 0,
@@ -2046,7 +2066,7 @@ lll
         isCharacter: false,
         isCheckingCollision: false,
     };
-    function init$6() {
+    function init$7() {
         letterCanvas = document.createElement("canvas");
         letterCanvas.width = letterCanvas.height = letterSize;
         letterContext = letterCanvas.getContext("2d");
@@ -2120,9 +2140,11 @@ lll
         }
         const options = mergeDefaultOptions(_options);
         if (options.backgroundColor !== "transparent") {
+            const lw = options.isSmallText ? smallLetterWidth : letterSize;
+            const xp = options.isSmallText ? 2 : 1;
             saveCurrentColor();
             setColor(options.backgroundColor);
-            fillRect(x, y, letterSize * options.scale.x, letterSize * options.scale.y);
+            fillRect(x + xp, y, lw * options.scale.x, letterSize * options.scale.y);
             loadCurrentColor();
         }
         if (cca <= 0x20) {
@@ -2306,7 +2328,7 @@ lll
         }
     }
     function createLetterImage(pattern, c, isCharacter) {
-        if (pattern.indexOf(".") >= 0) {
+        if (pattern.indexOf(".") >= 0 || pattern.indexOf("data:image/") == 0) {
             return createLetterImageFromFile(pattern, c);
         }
         let p = pattern.split("\n");
@@ -2430,12 +2452,12 @@ lll
         return b;
     }
     function mergeDefaultOptions(_options) {
-        let options = Object.assign(Object.assign({}, defaultOptions$4), _options);
+        let options = Object.assign(Object.assign({}, defaultOptions$3), _options);
         if (_options.scale != null) {
-            options.scale = Object.assign(Object.assign({}, defaultOptions$4.scale), _options.scale);
+            options.scale = Object.assign(Object.assign({}, defaultOptions$3.scale), _options.scale);
         }
         if (_options.mirror != null) {
-            options.mirror = Object.assign(Object.assign({}, defaultOptions$4.mirror), _options.mirror);
+            options.mirror = Object.assign(Object.assign({}, defaultOptions$3.mirror), _options.mirror);
         }
         return options;
     }
@@ -2586,18 +2608,18 @@ lll
         "BrowserBack",
     ];
     let code;
-    const defaultOptions$3 = {
+    const defaultOptions$2 = {
         onKeyDown: undefined,
     };
-    let options$3;
+    let options$2;
     let isKeyPressing = false;
     let isKeyPressed = false;
     let isKeyReleased = false;
     let pressingCode = {};
     let pressedCode = {};
     let releasedCode = {};
-    function init$5(_options) {
-        options$3 = Object.assign(Object.assign({}, defaultOptions$3), _options);
+    function init$6(_options) {
+        options$2 = Object.assign(Object.assign({}, defaultOptions$2), _options);
         code = fromEntities(codes.map((c) => [
             c,
             {
@@ -2609,8 +2631,8 @@ lll
         document.addEventListener("keydown", (e) => {
             isKeyPressing = isKeyPressed = true;
             pressingCode[e.code] = pressedCode[e.code] = true;
-            if (options$3.onKeyDown != null) {
-                options$3.onKeyDown();
+            if (options$2.onKeyDown != null) {
+                options$2.onKeyDown();
             }
             if (e.code === "AltLeft" ||
                 e.code === "AltRight" ||
@@ -2628,7 +2650,7 @@ lll
             releasedCode[e.code] = true;
         });
     }
-    function update$6() {
+    function update$7() {
         isJustPressed$2 = !isPressed$2 && isKeyPressed;
         isJustReleased$2 = isPressed$2 && isKeyReleased;
         isKeyPressed = isKeyReleased = false;
@@ -2648,14 +2670,14 @@ lll
 
     var keyboard = /*#__PURE__*/Object.freeze({
         __proto__: null,
-        get isPressed () { return isPressed$2; },
+        clearJustPressed: clearJustPressed$2,
+        get code () { return code; },
+        codes: codes,
+        init: init$6,
         get isJustPressed () { return isJustPressed$2; },
         get isJustReleased () { return isJustReleased$2; },
-        codes: codes,
-        get code () { return code; },
-        init: init$5,
-        update: update$6,
-        clearJustPressed: clearJustPressed$2
+        get isPressed () { return isPressed$2; },
+        update: update$7
     });
 
     class Random {
@@ -2714,7 +2736,7 @@ lll
     let isPressed$1 = false;
     let isJustPressed$1 = false;
     let isJustReleased$1 = false;
-    let defaultOptions$2 = {
+    let defaultOptions$1 = {
         isDebugMode: false,
         anchor: new Vector(),
         padding: new Vector(),
@@ -2722,7 +2744,7 @@ lll
     };
     let screen;
     let pixelSize;
-    let options$2;
+    let options$1;
     const debugRandom = new Random();
     const debugPos = new Vector();
     const debugMoveVel = new Vector();
@@ -2731,13 +2753,13 @@ lll
     let isDown = false;
     let isClicked = false;
     let isReleased = false;
-    function init$4(_screen, _pixelSize, _options) {
-        options$2 = Object.assign(Object.assign({}, defaultOptions$2), _options);
+    function init$5(_screen, _pixelSize, _options) {
+        options$1 = Object.assign(Object.assign({}, defaultOptions$1), _options);
         screen = _screen;
-        pixelSize = new Vector(_pixelSize.x + options$2.padding.x * 2, _pixelSize.y + options$2.padding.y * 2);
-        cursorPos.set(screen.offsetLeft + screen.clientWidth * (0.5 - options$2.anchor.x), screen.offsetTop + screen.clientWidth * (0.5 - options$2.anchor.y));
-        if (options$2.isDebugMode) {
-            debugPos.set(screen.offsetLeft + screen.clientWidth * (0.5 - options$2.anchor.x), screen.offsetTop + screen.clientWidth * (0.5 - options$2.anchor.y));
+        pixelSize = new Vector(_pixelSize.x + options$1.padding.x * 2, _pixelSize.y + options$1.padding.y * 2);
+        cursorPos.set(screen.offsetLeft + screen.clientWidth * (0.5 - options$1.anchor.x), screen.offsetTop + screen.clientWidth * (0.5 - options$1.anchor.y));
+        if (options$1.isDebugMode) {
+            debugPos.set(screen.offsetLeft + screen.clientWidth * (0.5 - options$1.anchor.x), screen.offsetTop + screen.clientWidth * (0.5 - options$1.anchor.y));
         }
         document.addEventListener("mousedown", (e) => {
             onDown(e.pageX, e.pageY);
@@ -2761,9 +2783,9 @@ lll
             onUp();
         }, { passive: false });
     }
-    function update$5() {
+    function update$6() {
         calcPointerPos(cursorPos.x, cursorPos.y, pos$1);
-        if (options$2.isDebugMode && !pos$1.isInRect(0, 0, pixelSize.x, pixelSize.y)) {
+        if (options$1.isDebugMode && !pos$1.isInRect(0, 0, pixelSize.x, pixelSize.y)) {
             updateDebug();
             pos$1.set(debugPos);
             isJustPressed$1 = !isPressed$1 && debugIsDown;
@@ -2785,12 +2807,12 @@ lll
         if (screen == null) {
             return;
         }
-        v.x = Math.round(((x - screen.offsetLeft) / screen.clientWidth + options$2.anchor.x) *
+        v.x = Math.round(((x - screen.offsetLeft) / screen.clientWidth + options$1.anchor.x) *
             pixelSize.x -
-            options$2.padding.x);
-        v.y = Math.round(((y - screen.offsetTop) / screen.clientHeight + options$2.anchor.y) *
+            options$1.padding.x);
+        v.y = Math.round(((y - screen.offsetTop) / screen.clientHeight + options$1.anchor.y) *
             pixelSize.y -
-            options$2.padding.y);
+            options$1.padding.y);
     }
     function updateDebug() {
         if (debugMoveVel.length > 0) {
@@ -2820,8 +2842,8 @@ lll
     function onDown(x, y) {
         cursorPos.set(x, y);
         isDown = isClicked = true;
-        if (options$2.onPointerDownOrUp != null) {
-            options$2.onPointerDownOrUp();
+        if (options$1.onPointerDownOrUp != null) {
+            options$1.onPointerDownOrUp();
         }
     }
     function onMove(x, y) {
@@ -2830,20 +2852,20 @@ lll
     function onUp(e) {
         isDown = false;
         isReleased = true;
-        if (options$2.onPointerDownOrUp != null) {
-            options$2.onPointerDownOrUp();
+        if (options$1.onPointerDownOrUp != null) {
+            options$1.onPointerDownOrUp();
         }
     }
 
     var pointer = /*#__PURE__*/Object.freeze({
         __proto__: null,
-        pos: pos$1,
-        get isPressed () { return isPressed$1; },
+        clearJustPressed: clearJustPressed$1,
+        init: init$5,
         get isJustPressed () { return isJustPressed$1; },
         get isJustReleased () { return isJustReleased$1; },
-        init: init$4,
-        update: update$5,
-        clearJustPressed: clearJustPressed$1
+        get isPressed () { return isPressed$1; },
+        pos: pos$1,
+        update: update$6
     });
 
     /** A pressed position of mouse or touch screen. */
@@ -2855,19 +2877,19 @@ lll
     /** A variable that becomes `true` when the button is just released. */
     let isJustReleased = false;
     /** @ignore */
-    function init$3(onInputDownOrUp) {
-        init$5({
+    function init$4(onInputDownOrUp) {
+        init$6({
             onKeyDown: onInputDownOrUp,
         });
-        init$4(canvas, size, {
+        init$5(canvas, size, {
             onPointerDownOrUp: onInputDownOrUp,
             anchor: new Vector(0.5, 0.5),
         });
     }
     /** @ignore */
-    function update$4() {
+    function update$5() {
+        update$7();
         update$6();
-        update$5();
         pos = pos$1;
         isPressed = isPressed$2 || isPressed$1;
         isJustPressed = isJustPressed$2 || isJustPressed$1;
@@ -2888,25 +2910,248 @@ lll
 
     var input = /*#__PURE__*/Object.freeze({
         __proto__: null,
-        get pos () { return pos; },
-        get isPressed () { return isPressed; },
+        clearJustPressed: clearJustPressed,
+        init: init$4,
         get isJustPressed () { return isJustPressed; },
         get isJustReleased () { return isJustReleased; },
-        init: init$3,
-        update: update$4,
-        clearJustPressed: clearJustPressed,
-        set: set
+        get isPressed () { return isPressed; },
+        get pos () { return pos; },
+        set: set,
+        update: update$5
     });
 
+    const soundEffectTypeToString = {
+        coin: "c",
+        laser: "l",
+        explosion: "e",
+        powerUp: "p",
+        hit: "h",
+        jump: "j",
+        select: "s",
+        lucky: "u",
+        random: "r",
+        click: "i",
+        synth: "y",
+        tone: "t",
+    };
     let audioContext;
-    let gainNodeForAudioFiles;
+    let isSoundEnabled = false;
+    let audioSeed;
+    let audioVolume;
+    let isAlgoChipLibraryEnabled = false;
+    let algoChipGainNode;
+    exports.algoChipSession = void 0;
+    let algoChipBgm;
+    let algoChipBgmSeed;
+    let algoChipSes = {};
+    let disposeVisibilityController;
+    let isSoundsSomeSoundsLibraryEnabled = false;
+    let sssGainNode;
+    let sssBgmTrack;
     let isAudioFilesEnabled = false;
-    let tempo;
-    let playInterval;
-    let quantize;
-    const audioFiles$1 = {};
+    let isBgmAudioFileReady = false;
+    let gainNodeForAudioFiles;
+    let audioFilePlayInterval;
+    let audioFileQuantize;
+    let audioFileStates = {};
+    let bgmName;
+    let bgmVolume;
+    async function init$3(options) {
+        audioSeed = options.audioSeed;
+        audioVolume = options.audioVolume;
+        bgmName = options.bgmName;
+        bgmVolume = options.bgmVolume;
+        if (typeof AlgoChip !== "undefined" &&
+            AlgoChip !== null &&
+            typeof AlgoChipUtil !== "undefined" &&
+            AlgoChipUtil !== null) {
+            isAlgoChipLibraryEnabled = isSoundEnabled = true;
+        }
+        else if (typeof sss !== "undefined" && sss !== null) {
+            isSoundsSomeSoundsLibraryEnabled = isSoundEnabled = true;
+        }
+        if (typeof audioFiles !== "undefined" && audioFiles != null) {
+            isAudioFilesEnabled = isSoundEnabled = true;
+        }
+        if (!isSoundEnabled) {
+            return false;
+        }
+        audioContext = new (window.AudioContext ||
+            window.webkitAudioContext)();
+        if (isAudioFilesEnabled) {
+            document.addEventListener("visibilitychange", () => {
+                if (document.hidden) {
+                    audioContext.suspend();
+                }
+                else {
+                    audioContext.resume();
+                }
+            });
+            initForAudioFiles();
+            setAudioFileVolume(0.1 * audioVolume);
+            setAudioFileTempo(options.audioTempo);
+            for (let audioName in audioFiles) {
+                const a = loadAudioFile(audioName, audioFiles[audioName]);
+                if (audioName === bgmName) {
+                    a.isLooping = true;
+                    isBgmAudioFileReady = true;
+                }
+            }
+        }
+        if (isAlgoChipLibraryEnabled) {
+            algoChipGainNode = audioContext.createGain();
+            algoChipGainNode.connect(audioContext.destination);
+            exports.algoChipSession = AlgoChipUtil.createAudioSession({
+                audioContext,
+                gainNode: algoChipGainNode,
+                workletBasePath: "https://abagames.github.io/algo-chip/worklets/",
+            });
+            await exports.algoChipSession.ensureReady();
+            exports.algoChipSession.setBgmVolume(0.5 * audioVolume);
+            disposeVisibilityController =
+                AlgoChipUtil.createVisibilityController(exports.algoChipSession);
+        }
+        if (isSoundsSomeSoundsLibraryEnabled) {
+            sssGainNode = audioContext.createGain();
+            sssGainNode.connect(audioContext.destination);
+            sss.init(audioSeed, audioContext, sssGainNode);
+            sss.setVolume(0.1 * audioVolume);
+            sss.setTempo(options.audioTempo);
+        }
+        return true;
+    }
+    function play$1(type, options) {
+        if (isAudioFilesEnabled &&
+            playAudioFile(type, options != null && options.volume != null ? options.volume : 1)) ;
+        else if (exports.algoChipSession != null) {
+            let t = type;
+            let seed = audioSeed;
+            if (t === "powerUp") {
+                t = "powerup";
+            }
+            else if (t === "random" || t === "lucky") {
+                t = "explosion";
+                seed++;
+            }
+            let baseFrequency;
+            if ((options === null || options === void 0 ? void 0 : options.freq) != null) {
+                baseFrequency = options.freq;
+            }
+            else if ((options === null || options === void 0 ? void 0 : options.pitch) != null) {
+                baseFrequency = 2 ** ((options.pitch - 69) / 12) * 440;
+            }
+            const seOptions = { seed, type: t, baseFrequency };
+            const seKey = JSON.stringify(seOptions);
+            if (algoChipSes[seKey] == null) {
+                algoChipSes[seKey] = exports.algoChipSession.generateSe(seOptions);
+            }
+            exports.algoChipSession.playSe(algoChipSes[seKey], {
+                volume: audioVolume * ((options === null || options === void 0 ? void 0 : options.volume) != null ? options === null || options === void 0 ? void 0 : options.volume : 1) * 0.7,
+                duckingDb: -8,
+                quantize: {
+                    loopAware: true,
+                    phase: "next",
+                    quantizeTo: "half_beat",
+                    fallbackTempo: 120,
+                },
+            });
+        }
+        else if (isSoundsSomeSoundsLibraryEnabled &&
+            typeof sss.playSoundEffect === "function") {
+            sss.playSoundEffect(type, options);
+        }
+        else if (isSoundsSomeSoundsLibraryEnabled) {
+            sss.play(soundEffectTypeToString[type]);
+        }
+    }
+    /** @ignore */
+    function setSeed(seed) {
+        audioSeed = seed;
+        if (isSoundsSomeSoundsLibraryEnabled) {
+            sss.setSeed(seed);
+        }
+    }
+    /**
+     * Play a background music
+     */
+    /** @ignore */
+    async function playBgm() {
+        if (isBgmAudioFileReady && playAudioFile(bgmName, bgmVolume)) ;
+        else if (exports.algoChipSession != null) {
+            if (algoChipBgm == null || algoChipBgmSeed != audioSeed) {
+                algoChipBgmSeed = audioSeed;
+                const random = new Random();
+                random.setSeed(audioSeed);
+                const calmEnergetic = random.get(-0.9, 0.9);
+                const percussiveMelodic = random.get(-0.9, 0.9);
+                algoChipBgm = await exports.algoChipSession.generateBgm({
+                    seed: audioSeed,
+                    lengthInMeasures: 32,
+                    twoAxisStyle: { calmEnergetic, percussiveMelodic },
+                    overrides: {
+                        tempo: "medium",
+                    },
+                });
+            }
+            exports.algoChipSession.playBgm(algoChipBgm, { loop: true });
+        }
+        else if (isSoundsSomeSoundsLibraryEnabled &&
+            typeof sss.generateMml === "function") {
+            sssBgmTrack = sss.playMml(sss.generateMml(), {
+                volume: bgmVolume,
+            });
+        }
+        else if (isSoundsSomeSoundsLibraryEnabled) {
+            sss.playBgm();
+        }
+    }
+    /**
+     * Stop a background music
+     */
+    /** @ignore */
+    function stopBgm() {
+        if (isBgmAudioFileReady) {
+            stopAudioFile(bgmName);
+        }
+        else if (exports.algoChipSession != null) {
+            exports.algoChipSession.stopBgm();
+        }
+        else if (sssBgmTrack != null) {
+            sss.stopMml(sssBgmTrack);
+        }
+        else if (isSoundsSomeSoundsLibraryEnabled) {
+            sss.stopBgm();
+        }
+    }
+    function update$4() {
+        if (isAudioFilesEnabled) {
+            updateForAudioFiles();
+        }
+        if (isSoundsSomeSoundsLibraryEnabled) {
+            sss.update();
+        }
+    }
+    function resume() {
+        if (audioContext != null) {
+            audioContext.resume();
+        }
+        if (exports.algoChipSession != null) {
+            exports.algoChipSession.resumeAudioContext();
+        }
+    }
+    function unload() {
+        if (isAudioFilesEnabled) {
+            stopAllAudioFiles();
+        }
+        if (isAlgoChipLibraryEnabled) {
+            disposeVisibilityController();
+            if (exports.algoChipSession != null) {
+                exports.algoChipSession.close();
+            }
+        }
+    }
     function playAudioFile(name, _volume = 1) {
-        const af = audioFiles$1[name];
+        const af = audioFileStates[name];
         if (af == null) {
             return false;
         }
@@ -2916,8 +3161,8 @@ lll
     }
     function updateForAudioFiles() {
         const currentTime = audioContext.currentTime;
-        for (const name in audioFiles$1) {
-            const af = audioFiles$1[name];
+        for (const name in audioFileStates) {
+            const af = audioFileStates[name];
             if (!af.isReady || !af.isPlaying) {
                 continue;
             }
@@ -2930,7 +3175,7 @@ lll
         }
     }
     function stopAudioFile(name, when = undefined) {
-        const af = audioFiles$1[name];
+        const af = audioFileStates[name];
         if (af.source == null) {
             return;
         }
@@ -2942,38 +3187,34 @@ lll
         }
         af.source = undefined;
     }
-    function initAudioContext() {
-        audioContext = new (window.AudioContext ||
-            window.webkitAudioContext)();
-        document.addEventListener("visibilitychange", () => {
-            if (document.hidden) {
-                audioContext.suspend();
-            }
-            else {
-                audioContext.resume();
-            }
-        });
+    function stopAllAudioFiles(when = undefined) {
+        if (!audioFileStates) {
+            return;
+        }
+        for (const name in audioFileStates) {
+            stopAudioFile(name, when);
+        }
+        audioFileStates = {};
     }
     function initForAudioFiles() {
         isAudioFilesEnabled = true;
         gainNodeForAudioFiles = audioContext.createGain();
         gainNodeForAudioFiles.connect(audioContext.destination);
-        setTempo();
-        setQuantize();
-        setVolume();
+        setAudioFileTempo();
+        setAudioFileQuantize();
+        setAudioFileVolume();
     }
     function loadAudioFile(key, url) {
-        audioFiles$1[key] = createBufferFromFile(url);
-        return audioFiles$1[key];
+        audioFileStates[key] = createBufferFromFile(url);
+        return audioFileStates[key];
     }
-    function setTempo(_tempo = 120) {
-        tempo = _tempo;
-        playInterval = 60 / tempo;
+    function setAudioFileTempo(tempo = 120) {
+        audioFilePlayInterval = 60 / tempo;
     }
-    function setQuantize(noteLength = 8) {
-        quantize = noteLength > 0 ? 4 / noteLength : undefined;
+    function setAudioFileQuantize(noteLength = 8) {
+        audioFileQuantize = noteLength > 0 ? 4 / noteLength : undefined;
     }
-    function setVolume(_volume = 0.1) {
+    function setAudioFileVolume(_volume = 0.1) {
         gainNodeForAudioFiles.gain.value = _volume;
     }
     function playLater(audio, when) {
@@ -2997,23 +3238,23 @@ lll
             isLooping: false,
         };
         af.gainNode.connect(gainNodeForAudioFiles);
-        loadFile(url).then((buffer) => {
+        fetchAudioFile(url).then((buffer) => {
             af.buffer = buffer;
             af.isReady = true;
         });
         return af;
     }
-    async function loadFile(url) {
+    async function fetchAudioFile(url) {
         const response = await fetch(url);
         const arrayBuffer = await response.arrayBuffer();
         const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
         return audioBuffer;
     }
     function getQuantizedTime(time) {
-        if (quantize == null) {
+        if (audioFileQuantize == null) {
             return time;
         }
-        const interval = playInterval * quantize;
+        const interval = audioFilePlayInterval * audioFileQuantize;
         return interval > 0 ? Math.ceil(time / interval) * interval : time;
     }
 
@@ -3022,34 +3263,18 @@ lll
     const targetFps = 68;
     const deltaTime = 1000 / targetFps;
     let nextFrameTime = 0;
-    const defaultOptions$1 = {
-        viewSize: { x: 100, y: 100 },
-        bodyBackground: "#111",
-        viewBackground: "black",
-        isCapturing: false,
-        isCapturingGameCanvasOnly: false,
-        isSoundEnabled: true,
-        captureCanvasScale: 1,
-        theme: { name: "simple", isUsingPixi: false, isDarkColor: false },
-        colorPalette: undefined,
-    };
-    let options$1;
     let textCacheEnableTicks = 10;
-    function init$2(__init, __update, _options) {
+    let loopFrameRequestId;
+    let isCapturing;
+    async function init$2(__init, __update, _isCapturing) {
         _init$1 = __init;
         _update$1 = __update;
-        options$1 = Object.assign(Object.assign({}, defaultOptions$1), _options);
-        init$8(options$1.theme.isDarkColor, options$1.colorPalette);
-        init$7(options$1.viewSize, options$1.bodyBackground, options$1.viewBackground, options$1.isCapturing, options$1.isCapturingGameCanvasOnly, options$1.captureCanvasScale, options$1.captureDurationSec, options$1.theme);
-        init$3(() => {
-            audioContext.resume();
-        });
-        init$6();
-        _init$1();
+        isCapturing = _isCapturing;
+        await _init$1();
         update$3();
     }
     function update$3() {
-        requestAnimationFrame(update$3);
+        loopFrameRequestId = requestAnimationFrame(update$3);
         const now = window.performance.now();
         if (now < nextFrameTime - targetFps / 12) {
             return;
@@ -3058,20 +3283,21 @@ lll
         if (nextFrameTime < now || nextFrameTime > now + deltaTime * 2) {
             nextFrameTime = now + deltaTime;
         }
-        if (isAudioFilesEnabled) {
-            updateForAudioFiles();
-        }
-        if (options$1.isSoundEnabled) {
-            sss.update();
-        }
         update$4();
+        update$5();
         _update$1();
-        if (options$1.isCapturing) {
+        if (isCapturing) {
             capture();
         }
         textCacheEnableTicks--;
         if (textCacheEnableTicks === 0) {
             enableCache();
+        }
+    }
+    function stop$1() {
+        if (loopFrameRequestId) {
+            cancelAnimationFrame(loopFrameRequestId);
+            loopFrameRequestId = undefined;
         }
     }
 
@@ -3130,7 +3356,7 @@ lll
      * @returns Information about objects that collided during drawing.
      */
     function rect(x, y, width, height) {
-        return drawRect(false, x, y, width, height);
+        return drawRect(false, x, y, width, height, "rect");
     }
     /**
      * Draw a box.
@@ -3141,7 +3367,7 @@ lll
      * @returns Information about objects that collided during drawing.
      */
     function box(x, y, width, height) {
-        return drawRect(true, x, y, width, height);
+        return drawRect(true, x, y, width, height, "box");
     }
     /**
      * Draw a bar, which is a line specified by the center coordinates and length.
@@ -3191,7 +3417,7 @@ lll
                 }
             }
             else {
-                throw "invalid params";
+                throwLineParamsError("when x1 is a number, y1 must also be a number.");
             }
         }
         else {
@@ -3202,7 +3428,7 @@ lll
                     thickness = y2;
                 }
                 else {
-                    throw "invalid params";
+                    throwLineParamsError("when x1 is a Vector and y1 is a number, x2 must be a number representing the new y-coordinate.");
                 }
             }
             else {
@@ -3212,7 +3438,7 @@ lll
                     thickness = x2;
                 }
                 else {
-                    throw "invalid params";
+                    throwLineParamsError("when both endpoints are Vectors, the last argument must be the thickness (number).");
                 }
             }
         }
@@ -3285,7 +3511,7 @@ lll
         concatTmpHitBoxes();
         return collision;
     }
-    function drawRect(isAlignCenter, x, y, width, height) {
+    function drawRect(isAlignCenter, x, y, width, height, fnName = "rect") {
         if (typeof x === "number") {
             if (typeof y === "number") {
                 if (typeof width === "number") {
@@ -3301,7 +3527,7 @@ lll
                 }
             }
             else {
-                throw "invalid params";
+                throwRectParamsError(fnName, "when x is a number, y must also be a number.");
             }
         }
         else {
@@ -3313,13 +3539,19 @@ lll
                     return addRect(isAlignCenter, x.x, x.y, y, width);
                 }
                 else {
-                    throw "invalid params";
+                    throwRectParamsError(fnName, "when x is a Vector and y is a number, width must be a number.");
                 }
             }
             else {
                 return addRect(isAlignCenter, x.x, x.y, y.x, y.y);
             }
         }
+    }
+    function throwLineParamsError(message) {
+        throw new Error(`line(): ${message}`);
+    }
+    function throwRectParamsError(fnName, message) {
+        throw new Error(`${fnName}(): ${message}`);
     }
     function drawLine(p, l, thickness, isAddingToTmp = false) {
         let isDrawing = true;
@@ -3533,18 +3765,19 @@ lll
     const videoBitsPerSecond = 100000 * scale;
     const masterVolume = 0.7;
     let mediaRecorder;
-    function start(canvas, audioContext, gainNodes) {
+    let drawLoopFrameRequestId;
+    function start(canvas, audioContext, gainNodes, logicalSize) {
         if (mediaRecorder != null) {
             return;
         }
         const virtualCanvas = document.createElement("canvas");
-        virtualCanvas.width = canvas.width * scale;
-        virtualCanvas.height = canvas.height * scale;
+        virtualCanvas.width = logicalSize.x * scale;
+        virtualCanvas.height = logicalSize.y * scale;
         const context = virtualCanvas.getContext("2d");
         context.imageSmoothingEnabled = false;
         const drawLoop = () => {
             context.drawImage(canvas, 0, 0, canvas.width, canvas.height, 0, 0, virtualCanvas.width, virtualCanvas.height);
-            requestAnimationFrame(drawLoop);
+            drawLoopFrameRequestId = requestAnimationFrame(drawLoop);
         };
         drawLoop();
         const stream = virtualCanvas.captureStream(recordingFps);
@@ -3590,6 +3823,10 @@ lll
             mediaRecorder.stop();
             mediaRecorder = undefined;
         }
+        if (drawLoopFrameRequestId) {
+            cancelAnimationFrame(drawLoopFrameRequestId);
+            drawLoopFrameRequestId = undefined;
+        }
     }
     function isRecording() {
         return mediaRecorder != null && mediaRecorder.state === "recording";
@@ -3605,6 +3842,8 @@ lll
     const floor = Math.floor;
     const round = Math.round;
     const ceil = Math.ceil;
+    const min = Math.min;
+    const max = Math.max;
     /** A variable incremented by one every 1/60 of a second. */
     exports.ticks = 0;
     /** A variable that is one at the beginning of the game, two after 1 minute, and increasing by one every minute. */
@@ -3711,7 +3950,7 @@ lll
      * When color names like "red", "yellow" etc. are specified as arguments to
      * the `color()` function, it assigns the closest color from the color palette to
      * the original color.
-     * @param colorName
+     * @param colorNameOrColorIndex
      */
     function color(colorNameOrColorIndex) {
         setColor(colorNameOrColorIndex);
@@ -3724,7 +3963,8 @@ lll
      * angle: Angle of particles spreading \
      * angleWidth: The range of angles over which particles diffuse. If omitted, it spreads in a circular shape \
      * count: Count of particles \
-     * speed: Speed of particles
+     * speed: Speed of particles \
+     * edgeColor: Color of the edge of particles
      */
     function particle(x, y, optionsOrCount, speed, angle, angleWidth) {
         let pos = new Vector();
@@ -3777,48 +4017,17 @@ lll
      * @param options.note Note string (e.g. "C4", "F#3", "Ab5")
      */
     function play(type, options) {
-        if (!isWaitingRewind && !isRewinding && currentOptions.isSoundEnabled) {
-            const v = options != null && options.volume != null ? options.volume : 1;
-            if (isAudioFilesEnabled && playAudioFile(type, v)) ;
-            else if (typeof sss.playSoundEffect === "function") {
-                sss.playSoundEffect(type, options);
-            }
-            else {
-                sss.play(soundEffectTypeToString[type]);
-            }
+        if (!isWaitingRewind && !isRewinding) {
+            play$1(type, options);
         }
     }
-    let bgmTrack;
-    /**
-     * Play a background music
-     */
     /** @ignore */
-    function playBgm() {
-        if (isBgmAudioFileReady &&
-            playAudioFile(currentOptions.bgmName, currentOptions.bgmVolume)) ;
-        else if (typeof sss.generateMml === "function") {
-            bgmTrack = sss.playMml(sss.generateMml(), {
-                volume: currentOptions.bgmVolume,
-            });
-        }
-        else {
-            sss.playBgm();
-        }
+    function startRecording() {
+        start(canvas, audioContext, [gainNodeForAudioFiles, algoChipGainNode, sssGainNode], size);
     }
-    /**
-     * Stop a background music
-     */
     /** @ignore */
-    function stopBgm() {
-        if (isBgmAudioFileReady) {
-            stopAudioFile(currentOptions.bgmName);
-        }
-        else if (bgmTrack != null) {
-            sss.stopMml(bgmTrack);
-        }
-        else {
-            sss.stopBgm();
-        }
+    function stopRecording() {
+        stop();
     }
     /**
      * Save and load game frame states. Used for realizing a rewind function.
@@ -3866,20 +4075,6 @@ lll
             end();
         }
     }
-    const soundEffectTypeToString = {
-        coin: "c",
-        laser: "l",
-        explosion: "e",
-        powerUp: "p",
-        hit: "h",
-        jump: "j",
-        select: "s",
-        lucky: "u",
-        random: "r",
-        click: "i",
-        synth: "y",
-        tone: "t",
-    };
     const defaultOptions = {
         isPlayingBgm: false,
         isCapturing: false,
@@ -3921,13 +4116,12 @@ lll
         inGame: updateInGame,
         gameOver: updateGameOver,
         rewind: updateRewind,
+        error: updateRuntimeError,
     };
     let hiScore = 0;
     let fastestTime;
     let isNoTitle = true;
-    let audioSeed = 0;
     let currentOptions;
-    let loopOptions;
     let scoreBoards;
     let isWaitingRewind = false;
     let isRewinding = false;
@@ -3936,17 +4130,15 @@ lll
     let gameOverText;
     let gameScriptFile;
     let localStorageKey;
-    let sssGainNode;
-    let isBgmAudioFileReady = false;
+    let runtimeErrorLines;
     /** @ignore */
     function init(settings) {
-        const win = window;
-        win.update = settings.update;
-        win.title = settings.title;
-        win.description = settings.description;
-        win.characters = settings.characters;
-        win.options = settings.options;
-        win.audioFiles = settings.audioFiles;
+        window.update = settings.update;
+        window.title = settings.title;
+        window.description = settings.description;
+        window.characters = settings.characters;
+        window.options = settings.options;
+        window.audioFiles = settings.audioFiles;
         onLoad();
     }
     /** @ignore */
@@ -3957,6 +4149,24 @@ lll
         else {
             currentOptions = defaultOptions;
         }
+        if (currentOptions.isMinifying) {
+            showMinifiedScript();
+        }
+        init$2(_init, _update, currentOptions.isCapturing);
+    }
+    /** @ignore */
+    function onUnload() {
+        stop$1();
+        stopRecording();
+        unload();
+        window.update = undefined;
+        window.title = undefined;
+        window.description = undefined;
+        window.characters = undefined;
+        window.options = undefined;
+        window.audioFiles = undefined;
+    }
+    async function _init() {
         const theme = {
             name: currentOptions.theme,
             isUsingPixi: false,
@@ -3971,25 +4181,15 @@ lll
             currentOptions.theme === "dark") {
             theme.isDarkColor = true;
         }
-        audioSeed = currentOptions.audioSeed + currentOptions.seed;
-        if (currentOptions.isMinifying) {
-            showMinifiedScript();
-        }
-        loopOptions = {
-            viewSize: currentOptions.viewSize,
-            bodyBackground: theme.isDarkColor ? "#101010" : "#e0e0e0",
-            viewBackground: theme.isDarkColor ? "blue" : "white",
-            theme,
-            isSoundEnabled: currentOptions.isSoundEnabled,
-            isCapturing: currentOptions.isCapturing,
-            isCapturingGameCanvasOnly: currentOptions.isCapturingGameCanvasOnly,
-            captureCanvasScale: currentOptions.captureCanvasScale,
-            captureDurationSec: currentOptions.captureDurationSec,
-            colorPalette: currentOptions.colorPalette,
-        };
-        init$2(_init, _update, loopOptions);
-    }
-    function _init() {
+        const bodyBackground = theme.isDarkColor ? "#101010" : "#e0e0e0";
+        const viewBackground = theme.isDarkColor ? "blue" : "white";
+        init$9(theme.isDarkColor, currentOptions.colorPalette);
+        init$8(currentOptions.viewSize, bodyBackground, viewBackground, currentOptions.isCapturing, currentOptions.isCapturingGameCanvasOnly, currentOptions.captureCanvasScale, currentOptions.captureDurationSec, theme);
+        init$4(() => {
+            resume();
+        });
+        init$7();
+        let audioSeed = currentOptions.audioSeed + currentOptions.seed;
         if (typeof description !== "undefined" &&
             description != null &&
             description.trim().length > 0) {
@@ -4008,25 +4208,14 @@ lll
         if (typeof characters !== "undefined" && characters != null) {
             defineCharacters(characters, "a");
         }
-        initAudioContext();
-        if (typeof audioFiles !== "undefined" && audioFiles != null) {
-            initForAudioFiles();
-            setVolume(0.1 * currentOptions.audioVolume);
-            setTempo(currentOptions.audioTempo);
-            for (let audioName in audioFiles) {
-                const a = loadAudioFile(audioName, audioFiles[audioName]);
-                if (audioName === currentOptions.bgmName) {
-                    a.isLooping = true;
-                    isBgmAudioFileReady = true;
-                }
-            }
-        }
         if (currentOptions.isSoundEnabled) {
-            sssGainNode = audioContext.createGain();
-            sssGainNode.connect(audioContext.destination);
-            sss.init(audioSeed, audioContext, sssGainNode);
-            sss.setVolume(0.1 * currentOptions.audioVolume);
-            sss.setTempo(currentOptions.audioTempo);
+            currentOptions.isSoundEnabled = await init$3({
+                audioSeed,
+                audioVolume: currentOptions.audioVolume,
+                audioTempo: currentOptions.audioTempo,
+                bgmName: currentOptions.bgmName,
+                bgmVolume: currentOptions.bgmVolume,
+            });
         }
         setColor("black");
         if (isNoTitle) {
@@ -4038,6 +4227,10 @@ lll
         }
     }
     function _update() {
+        if (state === "error") {
+            updateRuntimeError();
+            return;
+        }
         exports.df = exports.difficulty = exports.ticks / 3600 + 1;
         exports.tc = exports.ticks;
         const prevScore = exports.score;
@@ -4051,7 +4244,13 @@ lll
             ijr: isJustReleased,
         };
         clear();
-        updateFunc[state]();
+        try {
+            updateFunc[state]();
+        }
+        catch (error) {
+            handleUpdateError(error);
+            return;
+        }
         if (theme.isUsingPixi) {
             endFill();
             if (theme.name === "crt") {
@@ -4124,10 +4323,7 @@ lll
             exports.time++;
         }
         if (currentOptions.isRecording && !isRecording()) {
-            start(canvas, audioContext, [
-                gainNodeForAudioFiles,
-                sssGainNode,
-            ]);
+            startRecording();
         }
     }
     function initTitle() {
@@ -4227,7 +4423,7 @@ lll
         if (!currentOptions.isRecording || exports.isReplaying) {
             return;
         }
-        stop();
+        stopRecording();
     }
     function drawGameOver() {
         if (exports.isReplaying) {
@@ -4312,6 +4508,125 @@ lll
                 edgeColor: currentOptions.textEdgeColor.score,
             });
         }
+    }
+    function handleUpdateError(error) {
+        console.error("Error inside update():", error);
+        if (state === "error" && runtimeErrorLines != null) {
+            updateRuntimeError();
+            return;
+        }
+        runtimeErrorLines = createRuntimeErrorLines(error);
+        state = "error";
+        stopBgmForError();
+        updateRuntimeError();
+    }
+    function updateRuntimeError() {
+        if (runtimeErrorLines == null || runtimeErrorLines.length === 0) {
+            runtimeErrorLines = ["UPDATE ERROR", "See console for details."];
+        }
+        const optionsForText = currentOptions !== null && currentOptions !== void 0 ? currentOptions : defaultOptions;
+        const lw = optionsForText.isUsingSmallText ? smallLetterWidth : letterSize;
+        const totalHeight = runtimeErrorLines.length * letterSize;
+        const startY = Math.max(0, Math.floor((size.y - totalHeight) / 2));
+        safeResetViewColor();
+        clear$1();
+        runtimeErrorLines.forEach((line, index) => {
+            const x = Math.max(0, Math.floor((size.x - line.length * lw) / 2));
+            print(line, x, startY + index * letterSize, {
+                isSmallText: optionsForText.isUsingSmallText,
+                edgeColor: optionsForText.textEdgeColor.gameOver,
+            });
+        });
+    }
+    function safeResetViewColor() {
+        try {
+            setColor("black");
+        }
+        catch (
+        /** ignore */
+        _error) {
+            // Ignore; we simply leave the previous color in place.
+        }
+    }
+    function stopBgmForError() {
+        if ((currentOptions === null || currentOptions === void 0 ? void 0 : currentOptions.isPlayingBgm) &&
+            currentOptions.isSoundEnabled &&
+            typeof stopBgm === "function") {
+            stopBgm();
+        }
+    }
+    function createRuntimeErrorLines(error) {
+        const message = extractRuntimeErrorMessage(error);
+        const lines = wrapRuntimeErrorMessage(message);
+        const fullLines = ["UPDATE ERROR", ...lines];
+        fullLines.push("See console for details.");
+        return fullLines;
+    }
+    function extractRuntimeErrorMessage(error) {
+        var _a, _b;
+        if (error instanceof Error) {
+            const message = (_a = error.message) === null || _a === void 0 ? void 0 : _a.trim();
+            if (error.name && message && message.length > 0) {
+                return `${error.name}: ${message}`;
+            }
+            return (_b = message !== null && message !== void 0 ? message : error.name) !== null && _b !== void 0 ? _b : "Unknown error";
+        }
+        if (typeof error === "string") {
+            return error;
+        }
+        try {
+            return JSON.stringify(error);
+        }
+        catch (
+        /** ignore */
+        _) {
+            return "Unknown error";
+        }
+    }
+    function wrapRuntimeErrorMessage(message) {
+        const optionsForText = currentOptions !== null && currentOptions !== void 0 ? currentOptions : defaultOptions;
+        const lw = optionsForText.isUsingSmallText ? smallLetterWidth : letterSize;
+        const maxCharsPerLine = Math.max(6, Math.floor(size.x / lw) - 2);
+        const maxLines = 4;
+        const normalizedSegments = message
+            .split(/\r?\n/)
+            .map((segment) => segment.trim())
+            .filter((segment) => segment.length > 0);
+        if (normalizedSegments.length === 0) {
+            normalizedSegments.push("Unknown error");
+        }
+        const lines = [];
+        normalizedSegments.forEach((segment) => {
+            if (lines.length >= maxLines) {
+                return;
+            }
+            lines.push(...wrapSegment(segment, maxCharsPerLine, maxLines - lines.length));
+        });
+        return lines;
+    }
+    function wrapSegment(segment, maxCharsPerLine, remainingLineBudget) {
+        if (segment.length <= maxCharsPerLine) {
+            return [segment];
+        }
+        const results = [];
+        let rest = segment;
+        while (rest.length > 0 && results.length < remainingLineBudget) {
+            if (rest.length <= maxCharsPerLine) {
+                results.push(rest);
+                rest = "";
+                break;
+            }
+            let splitIndex = rest.lastIndexOf(" ", maxCharsPerLine);
+            if (splitIndex <= 0) {
+                splitIndex = maxCharsPerLine;
+            }
+            results.push(rest.slice(0, splitIndex).trim());
+            rest = rest.slice(splitIndex).trim();
+        }
+        if (rest.length > 0 && results.length < remainingLineBudget) {
+            results.push(rest);
+        }
+        return results;
     }
     function drawTime(time, x, y) {
         if (time == null) {
@@ -4541,8 +4856,36 @@ lll
         ['"select"', "sl"],
         ['"lucky"', "uc"],
     ];
+    // Test-only helper functions (guarded by NODE_ENV check)
+    // These allow testing of critical code paths that would otherwise be untestable
+    /**
+     * Test helper to set the isReplaying state.
+     * This enables testing of replay guard behavior in functions like addScore.
+     * @ignore
+     */
+    function __testSetReplaying(value) {
+        if (process.env.NODE_ENV === "test") {
+            exports.isReplaying = value;
+        }
+    }
+    /**
+     * Test helper to initialize currentOptions.
+     * This enables testing of option-dependent behavior like isUsingSmallText.
+     * @ignore
+     */
+    function __testInitOptions(options) {
+        if (process.env.NODE_ENV === "test") {
+            currentOptions = Object.assign(Object.assign({}, defaultOptions), options);
+            // Initialize scoreBoards if it's not already initialized
+            if (!scoreBoards) {
+                scoreBoards = [];
+            }
+        }
+    }
 
     exports.PI = PI;
+    exports.__testInitOptions = __testInitOptions;
+    exports.__testSetReplaying = __testSetReplaying;
     exports.abs = abs;
     exports.addGameScript = addGameScript;
     exports.addScore = addScore;
@@ -4575,8 +4918,11 @@ lll
     exports.lc = lc;
     exports.line = line;
     exports.ls = ls;
+    exports.max = max;
+    exports.min = min;
     exports.minifyReplaces = minifyReplaces;
     exports.onLoad = onLoad;
+    exports.onUnload = onUnload;
     exports.particle = particle;
     exports.play = play;
     exports.playBgm = playBgm;
@@ -4595,10 +4941,13 @@ lll
     exports.rndi = rndi;
     exports.rnds = rnds;
     exports.round = round;
+    exports.setAudioSeed = setSeed;
     exports.sin = sin;
     exports.sl = sl;
     exports.sqrt = sqrt;
+    exports.startRecording = startRecording;
     exports.stopBgm = stopBgm;
+    exports.stopRecording = stopRecording;
     exports.text = text;
     exports.times = times;
     exports.tms = tms;

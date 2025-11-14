@@ -1,4 +1,5 @@
 node_modules/
 .vscode/
+.serena/
 package-lock.json
 npm-debug.log

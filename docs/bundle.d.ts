@@ -31,11 +31,11 @@ declare type Options = {
   theme?: ThemeName;
   colorPalette?: number[][];
   textEdgeColor?: {
-    score?: Color;
-    floatingScore?: Color;
-    title?: Color;
-    description?: Color;
-    gameOver?: Color;
+    score?: Color | number;
+    floatingScore?: Color | number;
+    title?: Color | number;
+    description?: Color | number;
+    gameOver?: Color | number;
   };
   bgmName?: string;
   bgmVolume?: number;
@@ -200,13 +200,13 @@ declare function arc(
 
 // Draw letters
 declare type LetterOptions = {
-  color?: Color;
-  backgroundColor?: Color;
+  color?: Color | number;
+  backgroundColor?: Color | number;
   rotation?: number;
   mirror?: { x?: 1 | -1; y?: 1 | -1 };
   scale?: { x?: number; y?: number };
   isSmallText?: boolean;
-  edgeColor?: Color;
+  edgeColor?: Color | number;
 };
 
 declare function text(
@@ -244,7 +244,7 @@ declare function particle(
     speed?: number;
     angle?: number;
     angleWidth?: number;
-    edgeColor?: Color;
+    edgeColor?: Color | number;
   }
 ): void;
 declare function particle(
@@ -254,7 +254,7 @@ declare function particle(
     speed?: number;
     angle?: number;
     angleWidth?: number;
-    edgeColor?: Color;
+    edgeColor?: Color | number;
   }
 ): void;
 declare function particle(
@@ -476,6 +476,8 @@ declare function sqrt(v: number): number;
 declare function floor(v: number): number;
 declare function round(v: number): number;
 declare function ceil(v: number): number;
+declare function min(...values: number[]): number;
+declare function max(...values: number[]): number;
 declare function clamp(v: number, low?: number, high?: number): number;
 declare function wrap(v: number, low: number, high: number): number;
 declare function range(v: number): number[];
@@ -544,6 +546,9 @@ declare function play(
 ): void;
 declare function playBgm(): void;
 declare function stopBgm(): void;
+declare function setAudioSeed(seed: number): void;
+declare function startRecording(): void;
+declare function stopRecording(): void;
 
 // sounds-some-sounds interface
 // https://github.com/abagames/sounds-some-sounds
@@ -707,4 +712,17 @@ declare function init(settings: {
   description?: string;
   characters?: string[];
   options?: Options;
+  audioFiles?: { [key: string]: string };
 });
+
+/**
+ * Test helper to set the isReplaying state.
+ * @ignore
+ */
+declare function __testSetReplaying(value: boolean): void;
+
+/**
+ * Test helper to initialize currentOptions.
+ * @ignore
+ */
+declare function __testInitOptions(options: Options): void;
