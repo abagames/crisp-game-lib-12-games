@@ -1,0 +1,33 @@
+{
+  "name": "chain-drift",
+  "version": "1.0.0",
+  "description": "CHAIN DRIFT - a fixed-screen arcade game (crisp-game-lib 1.5.0)",
+  "main": "main.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "serve": "npx --yes http-server -p 8231 -c-1 .",
+    "smoke": "node tools/smoke-test.mjs http://localhost:8231/index.html --idle 5 --input 12",
+    "probe": "node tools/probe.mjs",
+    "ceremony": "node tools/ceremony.mjs",
+    "fullrun": "node tools/fullrun.mjs",
+    "gates": "npm run smoke && npm run probe && npm run audio && npm run ceremony && npm run fullrun",
+    "balance": "node tools/balance.mjs http://localhost:8231/index.html 90",
+    "botrun": "node tools/botrun.mjs",
+    "scav-measure": "node tools/scav-measure.mjs",
+    "repro-selfhit": "node tools/repro-selfhit.mjs",
+    "test": "npm run gates",
+    "audio": "node tools/audio.mjs"
+  },
+  "keywords": [
+    "arcade",
+    "crisp-game-lib"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "playwright": "^1.61.1"
+  }
+}

@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>CHAIN DRIFT</title>
+    <meta
+      name="viewport"
+      content="width=device-width, height=device-height, user-scalable=no, initial-scale=1, maximum-scale=1"
+    />
+    <!-- No audio library on purpose. main.js sets options.isSoundEnabled=false
+         and synthesises every sound itself with the Web Audio API, so the
+         engine's algo-chip / sounds-some-sounds path is never initialised and
+         the cabinet has exactly one sound source. -->
+    <!-- The engine ships with the cabinet. It used to come from unpkg, which
+         made every load -- player's and gate's alike -- depend on a third party
+         being up: with the CDN unreachable the page went black and threw
+         "onLoad is not defined", with nothing on screen to explain it. This is
+         an unmodified copy of crisp-game-lib@1.5.0/docs/bundle.js. Nothing on
+         this page may load from another origin; tools/probe.mjs asserts it. -->
+    <script src="./vendor/crisp-game-lib-1.5.0.js"></script>
+    <script src="./main.js"></script>
+    <script>
+      window.addEventListener("load", onLoad);
+    </script>
+  </head>
+  <body style="background: #111"></body>
+</html>
