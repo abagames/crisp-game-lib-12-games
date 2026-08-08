@@ -1,0 +1,10 @@
+{
+  "scripts": {
+    "serve": "python3 -m http.server 8931 --bind 127.0.0.1",
+    "smoke": "node tests/smoke-test.mjs http://127.0.0.1:8931/index.html --idle 5 --input 12",
+    "probe": "node tests/probe.mjs http://127.0.0.1:8931/index.html"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.0"
+  }
+}

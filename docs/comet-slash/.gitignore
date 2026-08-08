@@ -1,0 +1,44 @@
+# Dependencies. Restorable with `npm install`.
+# package-lock.json is ignored by the .gitignore at the repository root,
+# but we want to pin the playwright version, so we un-ignore and track it here.
+node_modules/
+!package-lock.json
+
+# Harness output. tests/shots/ holds screenshots that `npm run probe`
+# (tests/probe.mjs) mkdirs and writes at runtime — build products, not sources.
+# No spec or document currently cites those images as evidence, so ignore it wholesale.
+tests/shots/
+
+# In case Playwright writes artifacts into this directory.
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# Machine-local Claude Code permission settings (contains absolute paths).
+# This is the only file currently under .claude/, so the directory ends up
+# untracked as a whole; shared settings added there later will be tracked.
+.claude/settings.local.json
+
+# Logs and working files.
+*.log
+npm-debug.log*
+yarn-error.log
+
+# Editor and OS noise.
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Deliberately NOT ignored:
+#   assets/sprites/ - the validated pixel rasters. main.js does not load them at
+#                     runtime (their pixels are embedded as text, see the
+#                     PIXEL_SPRITES comment), but they are the reference the
+#                     embedded art must stay identical to.
+#   assets/source/  - raw / cutout / pixel / prompt / palette. The origin and
+#                     provenance of the sprites; VISUAL_DESIGN.md explicitly
+#                     requires keeping them.
+#   package-lock.json

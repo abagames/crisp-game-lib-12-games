@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, height=device-height, user-scalable=no, initial-scale=1, maximum-scale=1"
+    />
+    <title>COMET SLASH</title>
+    <link rel="icon" href="data:," />
+    <!-- Audio is self-implemented in audio.js (WebAudio). algo-chip is NOT loaded,
+         so crisp-game-lib's built-in play() is intentionally unused. -->
+    <script src="https://unpkg.com/crisp-game-lib@1.5.0/docs/bundle.js"></script>
+    <script src="./audio.js"></script>
+    <script src="./main.js"></script>
+    <script>
+      window.addEventListener("load", onLoad);
+    </script>
+  </head>
+  <body style="background: #000"></body>
+</html>
