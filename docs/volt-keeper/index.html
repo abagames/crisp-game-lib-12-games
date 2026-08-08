@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, height=device-height, user-scalable=no, initial-scale=1, maximum-scale=1"
+    />
+    <title>VOLT KEEPER</title>
+    <!--
+      No algo-chip scripts: the built-in sound path is deliberately unused.
+      BGM and SE are this project's own synth (audio/*.js), so options.isPlayingBgm
+      stays off and play() is never called.
+    -->
+    <script src="./audio/vk-dsp.js"></script>
+    <script src="./audio/vk-kit.js"></script>
+    <script src="./audio/vk-bus.js"></script>
+    <script src="https://unpkg.com/crisp-game-lib@1.5.0/docs/bundle.js"></script>
+    <script src="./main.js"></script>
+    <script>
+      window.addEventListener("load", onLoad);
+    </script>
+  </head>
+  <body style="background: #ddd"></body>
+</html>

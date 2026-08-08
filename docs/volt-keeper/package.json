@@ -1,0 +1,24 @@
+{
+  "name": "volt-keeper",
+  "version": "1.0.0",
+  "private": true,
+  "description": "VOLT KEEPER — a fixed-screen arcade game on crisp-game-lib with a self-implemented era-inspired audio subsystem.",
+  "type": "commonjs",
+  "scripts": {
+    "manifest": "node tools/export-manifest.mjs build/audio-manifest.json",
+    "validate:audio": "node tools/export-manifest.mjs build/audio-manifest.json && node ~/.claude/skills/building-era-authentic-game-audio/scripts/validate-audio-kit.mjs build/audio-manifest.json",
+    "test:audio": "node tests/audio.test.mjs",
+    "test:bgm": "node tests/bgm.test.mjs",
+    "test:geometry": "node tests/geometry.test.mjs",
+    "render": "node tools/render-audio.mjs",
+    "serve": "node tools/serve.mjs",
+    "smoke": "node tests/smoke.test.mjs",
+    "test": "npm run validate:audio && npm run render && npm run test:audio && npm run test:bgm && npm run test:geometry && npm run smoke"
+  },
+  "dependencies": {
+    "crisp-game-lib": "1.5.0"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.0"
+  }
+}

@@ -1,5 +1,8 @@
 node_modules/
 .vscode/
 .serena/
+.claude/
+.codex/
+AGENTS.md
 package-lock.json
 npm-debug.log

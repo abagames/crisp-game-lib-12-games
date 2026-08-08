@@ -1,0 +1,31 @@
+# Dependencies. Restored with `npm install`; package-lock.json is tracked.
+node_modules/
+!package-lock.json
+
+# Generated validation, audio render, and screenshot output.
+build/
+
+# Playwright artifacts.
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# Logs and coverage.
+coverage/
+*.log
+npm-debug.log*
+yarn-error.log
+
+# Machine-local agent settings.
+.claude/
+.codex/
+AGENTS.md
+
+# Editor and OS noise.
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
