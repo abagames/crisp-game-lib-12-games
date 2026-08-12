@@ -10,10 +10,13 @@
     "test:audio": "node tests/audio.test.mjs",
     "test:bgm": "node tests/bgm.test.mjs",
     "test:geometry": "node tests/geometry.test.mjs",
+    "test:campaign": "node tests/campaign.test.mjs",
+    "probe:campaign": "node tests/campaign-probe.mjs",
+    "play:feel": "node tests/feel-play.mjs",
     "render": "node tools/render-audio.mjs",
     "serve": "node tools/serve.mjs",
     "smoke": "node tests/smoke.test.mjs",
-    "test": "npm run validate:audio && npm run render && npm run test:audio && npm run test:bgm && npm run test:geometry && npm run smoke"
+    "test": "npm run validate:audio && npm run render && npm run test:audio && npm run test:bgm && npm run test:geometry && npm run test:campaign && npm run probe:campaign && npm run smoke"
   },
   "dependencies": {
     "crisp-game-lib": "1.5.0"

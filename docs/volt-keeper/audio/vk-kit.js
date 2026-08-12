@@ -220,6 +220,34 @@
       ],
     },
     {
+      id: "extend",
+      kind: "sfx",
+      steps: [
+        P(0, 0.06, m(72), 0.48, { duty: 0.25, env: "gate" }),
+        P(0.07, 0.06, m(79), 0.52, { duty: 0.25, env: "gate" }),
+        P(0.14, 0.16, m(84), 0.56, { duty: 0.125 }),
+        N(0, 0.04, 8000, 0.24, { freqTo: 5000 }),
+      ],
+    },
+    {
+      id: "jingle:gameClear",
+      kind: "jingle",
+      steps: [
+        L(0, 0.12, m(60), 0.4, { env: "gate" }),
+        L(0.14, 0.12, m(64), 0.42, { env: "gate" }),
+        L(0.28, 0.12, m(67), 0.44, { env: "gate" }),
+        L(0.42, 0.12, m(72), 0.46, { env: "gate" }),
+        L(0.58, 0.54, m(76), 0.5),
+        B(0, 0.12, m(36), 0.3),
+        B(0.14, 0.12, m(40), 0.31),
+        B(0.28, 0.12, m(43), 0.32),
+        B(0.42, 0.12, m(48), 0.33),
+        B(0.58, 0.54, m(52), 0.35),
+        N(0, 0.08, 5000, 0.18, { freqTo: 2500 }),
+        N(0.58, 0.18, 9000, 0.26, { freqTo: 3000 }),
+      ],
+    },
+    {
       id: "jingle:gameover",
       kind: "jingle",
       steps: [
@@ -431,9 +459,11 @@
   // `family` and `minIntervalFrames` are game-side fields; the manifest
   // validator ignores them.
   const EVENTS = [
+    { name: "game:clear", classification: "jingle", priority: 125, alias: "jingle:gameClear" },
     { name: "capacitor:warning", classification: "sfx", priority: 120, alias: "warning" },
     { name: "game:over", classification: "jingle", priority: 115, alias: "jingle:gameover" },
     { name: "keeper:miss", classification: "jingle", priority: 110, alias: "jingle:miss" },
+    { name: "keeper:extend", classification: "sfx", priority: 105, alias: "extend" },
     { name: "keeper:ground", classification: "sfx", priority: 100, alias: "ground", family: "ground", rank: 0 },
     { name: "keeper:groundEmpty", classification: "sfx", priority: 95, alias: "groundEmpty" },
     { name: "heavy:absorb", classification: "sfx", priority: 93, alias: "absorbHeavy", family: "ground", rank: 5 },

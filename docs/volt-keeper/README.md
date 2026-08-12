@@ -10,6 +10,28 @@ obstacles — they are harvest terrain that decides where the income is. Each wa
 sets a quota in banked energy; clearing it cashes the capacitor out into score and
 fits a full battery, and missing it fits a short one.
 
+The campaign is a finite sequence of **17 waves**. Every intermediate wave,
+including WAVE 8, uses the same quota settlement and surge into the next wave.
+Completing WAVE 17 settles its normal quota and battery bonus, then ends the run
+on a dedicated game-clear screen instead of creating WAVE 18. A straight clear
+takes about **9 minutes** including the short ceremonies.
+
+A run starts with **3 lives**. Score awards an **EXTEND** at **20,000**,
+**50,000**, and **100,000** points, then every **100,000** points without a
+per-run limit. Every crossed threshold is consumed even when a single score
+payment crosses several or the internal cap of **5 lives** prevents an increase.
+One payment announces the result once as `EXTEND +N` and plays one EXTEND sound.
+The HUD shows only reserve lives, excluding the Probe currently in play: three
+starting lives show two icons, and the five-life cap shows four. Demo play
+never earns EXTENDs, and the final GAME CLEAR tally suppresses their
+now-meaningless notice and sound.
+
+The keeper is a two-frame code-native **Capacitor Probe**: cyan and cardinally
+oriented in free movement, with a fixed front and a lateral current pulse;
+grounded and recovery states lock one frame and use cyan/purple respectively.
+Its sprite and life icons share one pixel silhouette; collision remains the
+same invisible 12×12 contact envelope.
+
 There are two pieces, and they are deliberate opposites. An **arrow** forces any
 spark that touches it onto the direction it points, whatever that spark was doing
 when it arrived — so a board can be read rather than simulated, and four arrows
@@ -53,6 +75,8 @@ npm run render -- --wav build/wav   # also bounce WAVs for auditioning
 npm run test:audio       # bus arbitration, gating, determinism, event coverage
 npm run test:bgm         # BGM continuity against a fake AudioContext
 npm run test:geometry    # lattice closure, orbit closure, 20k-frame stability
+npm run test:campaign    # WAVE 8/17 boundaries, freeze, EXTEND, score lifecycle
+npm run probe:campaign   # real Chromium high-WAVE injection + ceremony PNGs
 npm run smoke            # headless Chromium: console errors, loop, live audio
 npm test                 # all of the above
 ```
@@ -64,17 +88,26 @@ and `end()` is never called. `update()` owns frame zero onward and runs a phase
 machine; score, hi-score and every ceremony are drawn by `main.js`.
 
 ```
-boot ─▶ ATTRACT ──[Z]──▶ READY(100f) ──▶ PLAY ──miss──▶ MISS(90f) ──▶ PLAY
-          ▲                                  └─last life─▶ GAME OVER(260f) ─┐
-          └──────────────────────────────────────────────────────────────────┘
+boot ─▶ ATTRACT ──[Z]──▶ READY ─▶ PLAY ──miss──▶ MISS ─▶ PLAY
+          ▲                         ├─last life─▶ GAME OVER ─┤
+          └────────────────────────────W17 clear▶ GAME CLEAR
 ```
 
 - **ATTRACT** — a demo pilot drives the real `stepWorld()`: it predicts where each
   spark will pass, grounds just before one arrives, and backs off while recovering.
   All emissions are marked `demo: true` and suppressed; the hi-score is never
   written from a demo run. Hint cards rotate every 7 seconds.
-- **READY / MISS / GAME OVER** — the world is frozen; only the phase timer runs.
-  Game over shows the final score and flags a new record.
+- **READY / MISS / GAME OVER / GAME CLEAR** — the world is
+  frozen: player movement, sparks, collisions, spawns, the WAVE clock and
+  gameplay cooldowns do not advance. Ceremony timers and score tallying may run.
+  Clear/game-over screens show the final score and flag a new record.
+- **GAME CLEAR** retains WAVE 17, persists the final hi-score after the normal
+  charge tally, and returns to ATTRACT.
+- Skip input is ignored for the first 60 frames of clear/game-over ceremonies;
+  the accepted press changes one screen only and cannot bleed into gameplay.
+- WAVE 17 uses the fixed `FINALE` layout: four familiar circuit arrows and four
+  familiar corner bumpers, all 12 spark slots, the existing heavy/charger mix,
+  and a 15% higher quota. Its identity comes from composition, not speed alone.
 - The start press cannot bleed into a ground: attract consumes it, and `stepWorld`
   runs on the demo pilot's input that frame.
 
@@ -209,11 +242,15 @@ Measured jingle rate over 5 runs (mean 237 s): `game:start` 1.0, `keeper:miss` 2
 punctuation rather than accidental background music. On the last life
 `keeper:miss` and `game:over` are emitted on the same tick and both want
 `pulse1 + bass + noise`; arbitration keeps game over and drops the miss, verified
-in every run.
+in every run. A successful finite campaign adds `game:clear` once.
+`keeper:extend` occurs only on a score threshold, with
+no per-run limit; one score payment crossing several thresholds still emits it
+once, and the final-clear tally emits none.
 
-Priority order: danger warning (120) → game over (115) → miss (110) → ground/absorb
-family (100–90) → loss events (85–70) → cabinet jingles (60) → multiplier cap (55)
-→ terrain ambience (40–25) → BGM (20). Three deliberate silences carry no sound: `keeper:recover`,
+Priority order: game clear (125) → danger warning (120) → game over (115) →
+miss (110) → extend (105) → ground/absorb family (100–90)
+→ loss events (85–70) → cabinet jingles (60) → multiplier cap (55) → terrain
+ambience (40–25) → BGM (20). Three deliberate silences carry no sound: `keeper:recover`,
 `wave:layout`, `arrow:turn`.
 
 The `ground` family coalesces rather than dropping. Grounding onto a spark that is

@@ -233,11 +233,14 @@ check("layout families respect the concentration cap and the respawn keep-out", 
   }
   assert(seen.get("OPEN") === 1, "OPEN must be the wave-1 layout");
   assert(seen.get("CIRCUIT") === 2, "wave 2 is the teaching board and is not drawn from the bag");
-  assert(seen.size === 7, `all seven families should appear, saw ${[...seen.keys()].join(",")}`);
+  assert(seen.size === 8, `the seven core families plus FINALE should appear, saw ${[...seen.keys()].join(",")}`);
+  assert(seen.get("FINALE") === 17, "the dedicated FINALE layout must belong only to WAVE 17");
   // Twelve piloted runs ended at a median of wave 4 and never passed wave 6, so
   // a family first reachable later than that is content nobody ever sees. Two
   // of the previous six measured at 0 reaches in 12 runs.
-  for (const [id, w] of seen) assert(w <= 4, `${id} first appears at wave ${w}, past where runs end`);
+  for (const [id, w] of seen) {
+    if (id !== "FINALE") assert(w <= 4, `${id} first appears at wave ${w}, past where runs end`);
+  }
 });
 
 check("every populated family puts both piece kinds on one screen", () => {
@@ -334,6 +337,163 @@ check("both halves of the ground gesture show their remaining time", () => {
   }
 });
 
+check("movement, stop and ground feedback are immediate and return to rest", () => {
+  const sim = loadGame({ seed: 8642 });
+  sim.startPlay();
+  const st = sim.api.state();
+  st.sparks.length = 0;
+  st.pending.length = 0;
+  sim.particles.length = 0;
+
+  const x0 = st.keeper.x;
+  sim.clearDraws();
+  sim.step(["ArrowRight"]);
+  assert(st.keeper.x > x0, "the first movement frame did not move the authoritative keeper");
+  assert(
+    sim.particles.some((p) => p.color === "light_cyan" && p.opts.count === sim.api.FEEL.moveBurst),
+    "movement start produced no bounded cyan wake"
+  );
+  assert(sim.draws.some((d) => d.fn === "bar" && d.len === 5 && d.color === "light_cyan"), "movement drew no trail");
+
+  sim.particles.length = 0;
+  sim.clearDraws();
+  sim.step([]);
+  assert(
+    sim.particles.some((p) => p.color === "light_black" && p.opts.count === sim.api.FEEL.moveBurst),
+    "movement stop produced no neutral settling tick"
+  );
+  for (let i = 0; i < 8; i++) sim.step([]);
+  assert(st.keeper.stopFlash === 0, `stop feedback accumulated instead of resting (${st.keeper.stopFlash})`);
+
+  sim.particles.length = 0;
+  sim.clearDraws();
+  sim.step(["KeyZ"]);
+  assert(st.keeper.state === "ground", "the action press was not applied on its first frame");
+  assert(
+    sim.particles.some((p) => p.color === "cyan" && p.opts.count === sim.api.FEEL.groundBurst),
+    "ground start produced no radial confirmation"
+  );
+  const catchRings = sim.draws.filter(
+    (d) => d.fn === "arc" && d.radius === 22 && Math.abs(d.x - st.keeper.x) < 1 && Math.abs(d.y - st.keeper.y) < 1
+  );
+  assert(catchRings.length === 1, `ground pulse duplicated or distorted the catch radius (${catchRings.length} rings)`);
+});
+
+check("every named movement and ground binding responds on its first frame", () => {
+  for (const [key, axis, sign] of [
+    ["ArrowLeft", "x", -1],
+    ["KeyA", "x", -1],
+    ["ArrowRight", "x", 1],
+    ["KeyD", "x", 1],
+    ["ArrowUp", "y", -1],
+    ["KeyW", "y", -1],
+    ["ArrowDown", "y", 1],
+    ["KeyS", "y", 1],
+  ]) {
+    const sim = loadGame({ seed: 4321 });
+    sim.startPlay();
+    const before = sim.api.state().keeper[axis];
+    sim.step([key]);
+    const delta = sim.api.state().keeper[axis] - before;
+    assert(Math.sign(delta) === sign, `${key} did not move ${axis} on its first frame (delta ${delta})`);
+  }
+  for (const key of ["Space", "KeyZ", "KeyX", "KeyJ", "KeyK"]) {
+    const sim = loadGame({ seed: 5432 });
+    sim.startPlay();
+    sim.step([key]);
+    assert(sim.api.state().keeper.state === "ground", `${key} did not ground on its first frame`);
+  }
+});
+
+check("absorb feedback has explicit reward colours and bounded weight tiers", () => {
+  const cases = [
+    ["spark", "cyan", 8],
+    ["charger", "light_green", 12],
+    ["heavy", "green", 16],
+  ];
+  for (const [type, wantColor, wantCount] of cases) {
+    const sim = loadGame({ seed: 9191 });
+    sim.startPlay();
+    const st = sim.api.state();
+    st.sparks.length = 0;
+    const d = sim.api.DIRS[0];
+    const spark = sim.api.makeSpark(st.keeper.x, st.keeper.y, d, 1.5, type);
+    st.sparks.push(spark);
+    sim.particles.length = 0;
+    sim.api.absorbSpark(spark, 0);
+    const fx = sim.particles[sim.particles.length - 1];
+    assert(fx && fx.color === wantColor, `${type} absorb used ${fx && fx.color}, expected ${wantColor}`);
+    assert(fx.opts.count === wantCount, `${type} absorb emitted ${fx.opts.count}, expected ${wantCount}`);
+    assert(fx.opts.angleWidth === Math.PI * 2, `${type} absorb was not a radial reward glint`);
+  }
+  const burstCaps = Object.entries(game.api.FEEL)
+    .filter(([name]) => name.endsWith("Burst"))
+    .map(([, value]) => value);
+  assert(Math.max(...burstCaps) <= 24, "an individual feedback burst exceeds the 24-particle hard cap");
+});
+
+check("simultaneous feedback obeys the global per-frame particle cap", () => {
+  const sim = loadGame({ seed: 9292 });
+  sim.startPlay();
+  sim.particles.length = 0;
+  for (let i = 0; i < 4; i++) {
+    sim.api.burst(100 + i, 100, "cyan", { count: 24, speed: 1, angle: 0, angleWidth: Math.PI * 2 });
+  }
+  const total = sim.particles.reduce((sum, p) => sum + p.opts.count, 0);
+  assert(total === sim.api.FEEL.frameParticleCap, `same-frame bursts emitted ${total}, expected cap ${sim.api.FEEL.frameParticleCap}`);
+});
+
+check("near miss feedback confirms only a completed safe pass", () => {
+  const sim = loadGame({ seed: 2121 });
+  sim.startPlay();
+  const st = sim.api.state();
+  sim.api.setPieces([]);
+  st.sparks.length = 0;
+  st.pending.length = 0;
+  st.keeper.invuln = 0;
+  const d = { x: Math.SQRT1_2, y: Math.SQRT1_2 };
+  st.sparks.push(sim.api.makeSpark(st.keeper.x + 8, st.keeper.y + 8, d, 3, "spark"));
+  const lives0 = st.lives;
+  sim.particles.length = 0;
+  sim.step([]); // enter the 15px envelope without touching the 12x12 body
+  assert(sim.api.state().feedback.nearMissFlash === 0, "near miss fired before the spark had safely passed");
+  sim.step([]); // leave the envelope: now the pass is confirmed
+  assert(st.lives === lives0, "the supposed near miss was actually a hit");
+  assert(sim.api.state().feedback.nearMissFlash > 0, "the completed safe pass produced no bracket");
+  assert(
+    sim.particles.some((p) => p.color === "light_black" && p.opts.count === 3),
+    "near miss used no restrained neutral particle tick"
+  );
+});
+
+check("a scavenged arrow visibly returns once and then settles", () => {
+  const sim = loadGame({ seed: 3131 });
+  sim.startPlay();
+  const piece = {
+    x: 150,
+    y: 120,
+    kind: "arrow",
+    dir: 0,
+    spin: 0,
+    phase: 0,
+    disabledUntil: sim.frame + 1,
+    flash: 0,
+    wasDisabled: true,
+    restoreFlash: 0,
+  };
+  sim.api.setPieces([piece]);
+  sim.particles.length = 0;
+  sim.step([]);
+  sim.step([]);
+  assert(piece.restoreFlash > 0, "the arrow recovered with no visible state-change pulse");
+  assert(
+    sim.particles.some((p) => p.color === "light_cyan" && p.opts.count === 6),
+    "arrow recovery used no bounded cyan burst"
+  );
+  for (let i = 0; i < 16; i++) sim.step([]);
+  assert(piece.restoreFlash === 0, `arrow recovery feedback did not return to rest (${piece.restoreFlash})`);
+});
+
 check("each enemy type has its own silhouette, not just its own colour", () => {
   // At 8px a red square and a yellow square are the same object with a
   // different palette index. Identity has to be carried by shape.
@@ -355,20 +515,24 @@ check("each enemy type has its own silhouette, not just its own colour", () => {
     sim.clearDraws();
     sim.step([]);
     // Primitives drawn while exactly one enemy type is on screen.
-    const prims = sim.draws
-      .filter((d) => ["arc", "bar", "box"].includes(d.fn) && d.y > api.FIELD.top)
-      .map((d) => d.fn);
-    shapeOf.set(only, [...new Set(prims)].sort().join("+"));
+    const prims = sim.draws.filter((d) => ["arc", "bar", "box"].includes(d.fn) && d.y > api.FIELD.top);
+    shapeOf.set(only, {
+      branch: prims.some((d) => d.fn === "bar" && d.thickness === 1),
+      shell: prims.some((d) => d.fn === "arc" && d.radius === 6 && d.thickness === 2),
+      streak: prims.some((d) => d.fn === "bar" && d.thickness === 3),
+      splitCore: prims.some((d) => d.fn === "box" && d.w === 2),
+      chargeCore: prims.some((d) => d.fn === "box" && d.w === 4),
+    });
   }
   assert(shapeOf.has("spark"), "no frame contained only ordinary sparks");
-  const signatures = [...shapeOf.values()];
+  assert(shapeOf.get("spark").branch, "ordinary sparks need a one-pixel side discharge");
   assert(
-    new Set(signatures).size === signatures.length,
-    `enemy silhouettes are not distinct: ${[...shapeOf].map(([k, v]) => `${k}=${v}`).join(", ")}`
+    !shapeOf.has("heavy") || (shapeOf.get("heavy").shell && shapeOf.get("heavy").splitCore),
+    "the heavy must be a hollow shell, showing what it splits into"
   );
   assert(
-    !shapeOf.has("heavy") || shapeOf.get("heavy").includes("arc"),
-    "the heavy must be a hollow shell, showing what it splits into"
+    !shapeOf.has("charger") || (shapeOf.get("charger").streak && shapeOf.get("charger").chargeCore),
+    "the charger must be a thick speed streak with a compact core"
   );
 });
 
@@ -1047,11 +1211,47 @@ check("the keeper is not on screen during the GAME OVER ceremony", () => {
     // so its keeper belongs to the demo, not to the run that just ended.
     if (sim.api.state().phase !== "gameover") break;
     overFrames++;
-    // The 12px box is the keeper's body; nothing else in the field draws one.
-    const body = sim.draws.filter((d) => d.fn === "box" && d.w === 12);
+    const body = sim.draws.filter((d) => d.fn === "char" && ["c", "d"].includes(d.text) && d.scale.x === 2);
     assert(body.length === 0, `the keeper was drawn at (${body[0] && body[0].x},${body[0] && body[0].y})`);
   }
   assert(overFrames > 60, `the ceremony only lasted ${overFrames} frames`);
+});
+
+check("the keeper stays hidden and inert during MISS, then returns on PLAY", () => {
+  const sim = loadGame({ seed: 2323 });
+  sim.startPlay();
+  let guard = 0;
+  while (sim.api.state().phase !== "miss" && sim.api.state().phase !== "gameover" && guard++ < 30000) {
+    sim.clearDraws();
+    const before = sim.api.state();
+    sim.step([]);
+    const after = sim.api.state();
+    if (after.phase === "miss") {
+      const body = sim.draws.filter((d) => d.fn === "char" && ["c", "d"].includes(d.text) && d.scale.x === 2);
+      assert(body.length === 0, "MISS must not draw the respawned keeper");
+      assert(after.keeper.x === 128 && after.keeper.y === 124, "MISS must retain the authoritative respawn position");
+      assert(after.gameScore === before.gameScore, "MISS must not advance scoring");
+      assert(after.sparks.length === before.sparks.length, "MISS must freeze the spark population");
+      const missStart = after.phaseTimer;
+      sim.clearDraws();
+      sim.step([]);
+      const during = sim.api.state();
+      assert(during.phase === "miss", "MISS ended too early");
+      assert(during.phaseTimer === missStart - 1, "MISS timer must advance exactly one frame");
+      assert(
+        sim.draws.filter((d) => d.fn === "char" && ["c", "d"].includes(d.text) && d.scale.x === 2).length === 0,
+        "keeper appeared during MISS"
+      );
+      while (sim.api.state().phase === "miss") sim.step([]);
+      assert(sim.api.state().phase === "play", "a remaining-life MISS must resume PLAY");
+      assert(
+        sim.draws.some((d) => d.fn === "char" && ["c", "d"].includes(d.text) && d.scale.x === 2),
+        "keeper must return when PLAY resumes"
+      );
+      return;
+    }
+  }
+  assert(false, "the deterministic run never reached a remaining-life MISS");
 });
 
 check("no phase paints a filled slab across the playfield", () => {
@@ -1106,11 +1306,330 @@ check("every frame draws the capacitor, wave, multiplier and lives", () => {
     const texts = d.filter((x) => x.fn === "text").map((x) => x.text);
     assert(texts.some((t) => t.includes(`W${st.wave}`)), `frame ${f}: wave not shown`);
     assert(texts.some((t) => t === `x${st.multiplier}`), `frame ${f}: multiplier not shown`);
-    assert(
-      texts.some((t) => /^\**$/.test(t) && t.length === Math.max(0, st.lives)),
-      `frame ${f}: lives not shown (expected ${st.lives} markers)`
+    const lifeIcons = d.filter(
+      (x) => x.fn === "char" && x.text === api.PROBE_FRAME_A && x.scale.x === 1 && x.y === api.VISUAL.hud.lives.y
     );
+    assert(lifeIcons.length === Math.min(4, Math.max(0, st.lives - 1)), `frame ${f}: reserve lives not shown as probe icons`);
+    assert(!texts.includes("+"), `frame ${f}: obsolete fifth-life plus returned`);
   }
+});
+
+check("Capacitor Probe frames, facing, grounding and recovery match the visual contract", () => {
+  const sim = loadGame({ seed: 4242 });
+  const rows = (pattern) => pattern.split("\n").slice(1, -1).map((row) => row.padEnd(6, " "));
+  const frameA = rows(sim.sandbox.characters[2]);
+  const frameB = rows(sim.sandbox.characters[3]);
+  assert(
+    JSON.stringify(frameA) === JSON.stringify([" cccc ", "cccccc", "cc  cc", "cccccc", "cc ccc", "cccccc"]),
+    "Capacitor Probe Frame A pixels drifted"
+  );
+  assert(
+    JSON.stringify(frameB) === JSON.stringify([" cccc ", "cccccc", "cc  cc", "cccccc", "ccc cc", "cccccc"]),
+    "Capacitor Probe Frame B pixels drifted"
+  );
+
+  const rotate = (grid) => grid[0].map((_, x) => grid.map((row) => row[x]).reverse());
+  const pixels = (grid) => grid.map((row) => [...row]);
+  const frontProjection = [
+    ([x, y]) => -y,
+    ([x]) => x,
+    ([, y]) => y,
+    ([x]) => -x,
+  ];
+  let rotatedA = pixels(frameA);
+  let rotatedB = pixels(frameB);
+  for (let rotation = 0; rotation < 4; rotation++) {
+    const differences = [];
+    for (let y = 0; y < 6; y++) {
+      for (let x = 0; x < 6; x++) {
+        if (rotatedA[y][x] !== rotatedB[y][x]) differences.push([x, y]);
+        if (x === 0 || x === 5 || y === 0 || y === 5) {
+          assert(rotatedA[y][x] === rotatedB[y][x], `rotation ${rotation}: outer contour changed at ${x},${y}`);
+        }
+      }
+    }
+    assert(differences.length === 2, `rotation ${rotation}: animation changed ${differences.length} cells`);
+    const projection = differences.map(frontProjection[rotation]);
+    assert(projection[0] === projection[1], `rotation ${rotation}: animated current moved toward or away from the front`);
+    rotatedA = rotate(rotatedA);
+    rotatedB = rotate(rotatedB);
+  }
+  assert(frameA[0] === frameB[0], "upward-facing terminal must be fixed");
+  assert(frameA[2] === frameB[2] && frameA[2] === "cc  cc", "face-like gaps must stay on one row");
+  assert(frameA[5] === frameB[5] && frameA[5] === "cccccc", "grounding bus must be fixed");
+  sim.startPlay();
+  const body = () =>
+    sim.draws.filter(
+      (d) => d.fn === "char" && [api.PROBE_FRAME_A, api.PROBE_FRAME_B].includes(d.text) && d.scale.x === 2
+    );
+
+  const idleFrames = new Set();
+  for (let i = 0; i < api.PROBE_ANIMATION_FRAMES * 2 + 2; i++) {
+    sim.clearDraws();
+    sim.step([]);
+    const probe = body()[0];
+    assert(probe && probe.color === "cyan" && probe.rotation === 0, "idle probe lost its cyan upward presentation");
+    idleFrames.add(probe.text);
+  }
+  assert(idleFrames.has(api.PROBE_FRAME_A) && idleFrames.has(api.PROBE_FRAME_B), "free probe did not alternate A/B");
+
+  for (const [key, rotation] of [
+    ["ArrowRight", 1],
+    ["ArrowDown", 2],
+    ["ArrowLeft", 3],
+    ["ArrowUp", 0],
+  ]) {
+    sim.clearDraws();
+    sim.step([key]);
+    assert(body()[0]?.rotation === rotation, `${key} produced rotation ${body()[0]?.rotation}`);
+  }
+
+  sim.step(["ArrowRight"]);
+  sim.clearDraws();
+  sim.step(["ArrowRight", "ArrowUp"]);
+  assert(body()[0]?.rotation === 1, "up-right diagonal did not retain compatible right facing");
+  sim.clearDraws();
+  sim.step(["ArrowLeft", "ArrowUp"]);
+  assert(body()[0]?.rotation === 0, "incompatible diagonal did not choose its stable vertical axis");
+  sim.clearDraws();
+  sim.step(["ArrowLeft", "ArrowUp"]);
+  assert(body()[0]?.rotation === 0, "held diagonal flickered away from its chosen axis");
+
+  sim.clearDraws();
+  sim.step(["KeyZ"]);
+  let probe = body()[0];
+  assert(sim.api.state().keeper.state === "ground", "action did not enter ground");
+  assert(probe?.text === api.PROBE_FRAME_B && probe.color === "cyan", "ground must lock cyan Frame B");
+  while (sim.api.state().keeper.state === "ground") sim.step([]);
+  sim.clearDraws();
+  sim.step([]);
+  probe = body()[0];
+  assert(sim.api.state().keeper.state === "recover", "ground did not enter recover");
+  assert(probe?.text === api.PROBE_FRAME_A && probe.color === "purple", "recover must lock purple Frame A");
+  assert(sim.draws.some((d) => d.fn === "arc" && d.color === "purple"), "recover countdown arc disappeared");
+});
+
+check("the invulnerable Probe blinks 4f on / 4f off and MISS remains hidden", () => {
+  const sim = loadGame({ seed: 9191 });
+  sim.startPlay();
+  sim.api.loseLife("test");
+  sim.clearDraws();
+  sim.step([]);
+  assert(sim.api.state().phase === "miss", "test miss did not enter MISS");
+  assert(
+    !sim.draws.some((d) => d.fn === "char" && [api.PROBE_FRAME_A, api.PROBE_FRAME_B].includes(d.text) && d.scale.x === 2),
+    "Probe appeared during MISS"
+  );
+  while (sim.api.state().phase === "miss") sim.step([]);
+  for (let i = 0; i < 8; i++) {
+    sim.clearDraws();
+    sim.step([]);
+    const tick = sim.frame - 1;
+    const shown = sim.draws.some(
+      (d) => d.fn === "char" && [api.PROBE_FRAME_A, api.PROBE_FRAME_B].includes(d.text) && d.scale.x === 2
+    );
+    assert(shown === (tick % 8 < 4), `invulnerability blink disagreed at tick ${tick}`);
+  }
+});
+
+check("ATTRACT, READY and GAME CLEAR retain the Probe under existing phase rules", () => {
+  const hasProbe = (sim) =>
+    sim.draws.some(
+      (d) => d.fn === "char" && [api.PROBE_FRAME_A, api.PROBE_FRAME_B].includes(d.text) && d.scale.x === 2
+    );
+  const attract = loadGame({ seed: 1111 });
+  attract.clearDraws();
+  attract.step([]);
+  assert(attract.api.state().phase === "attract" && hasProbe(attract), "ATTRACT did not draw the Probe");
+  attract.clearDraws();
+  attract.step(["KeyZ"]);
+  assert(attract.api.state().phase === "ready" && hasProbe(attract), "READY did not draw the Probe");
+
+  for (const [wave, phase] of [[17, "finalclear"]]) {
+    const sim = loadGame({ seed: wave });
+    sim.startPlay();
+    sim.api.injectWaveEnd(wave, { capacitor: 80, score: 1000 });
+    let shown = false;
+    for (let i = 0; i < 8; i++) {
+      sim.clearDraws();
+      sim.step([]);
+      assert(sim.api.state().phase === phase, `WAVE ${wave} did not enter ${phase}`);
+      shown ||= hasProbe(sim);
+    }
+    assert(shown, `${phase} never showed the Probe during its 4f blink window`);
+  }
+});
+
+check("the Probe keeps the authoritative ±6px contact envelope", () => {
+  for (const [dx, dy] of [[0, 0], [6, 0], [-6, 6], [0, -6]]) {
+    assert(api.touchesKeeper(dx, dy), `(${dx},${dy}) escaped the old contact envelope`);
+  }
+  for (const [dx, dy] of [[6.001, 0], [-6.001, 0], [0, 6.001], [0, -6.001]]) {
+    assert(!api.touchesKeeper(dx, dy), `(${dx},${dy}) entered beyond the old contact envelope`);
+  }
+});
+
+check("life HUD uses one cyan Probe per reserve life", () => {
+  const sim = loadGame({ seed: 5151 });
+  for (let lives = 1; lives <= 5; lives++) {
+    sim.api.setLives(lives);
+    sim.clearDraws();
+    sim.api.drawLivesHud();
+    const icons = sim.draws.filter(
+      (d) => d.fn === "char" && d.text === api.PROBE_FRAME_A && d.scale.x === 1 && d.y === api.VISUAL.hud.lives.y
+    );
+    assert(icons.length === Math.max(0, lives - 1), `${lives} total lives drew ${icons.length} reserve icons`);
+    assert(icons.every((d) => d.color === "cyan" && d.rotation === 0), "life icons changed colour or facing");
+    assert(icons.every((d, i) => d.x === api.VISUAL.hud.lives.x + i * 7), "life icons lost their fixed spacing");
+    const plus = sim.draws.filter((d) => d.fn === "text" && d.text === "+");
+    assert(plus.length === 0, `${lives} lives produced an obsolete plus marker`);
+    assert(icons.every((d) => d.x - 3 > 132 && d.x + 3 < 256), "life icon overlaps WAVE label or screen edge");
+  }
+});
+
+check("pixel ports, specialist sparks and title logo keep distinct silhouettes", () => {
+  const sim = loadGame({ seed: 5152 });
+  assert(sim.api.PORT_FRAME_IDLE === "e" && sim.api.PORT_FRAME_CHARGED === "f", "port frames lost their stable IDs");
+  assert(sim.api.portRotation({ x: 2, y: 124 }) === 0, "left port did not face inward");
+  assert(sim.api.portRotation({ x: 253, y: 124 }) === 2, "right port did not face inward");
+  assert(sim.api.portRotation({ x: 128, y: 25 }) === 1, "top port did not face inward");
+  assert(sim.api.portRotation({ x: 128, y: 222 }) === 3, "bottom port did not face inward");
+
+  const sample = { x: 100, y: 100, dx: 1, dy: 0, speed: 2 };
+  sim.clearDraws();
+  sim.api.drawHeavySpark(sample, false);
+  const heavy = sim.draws.map((d) => d.fn);
+  sim.clearDraws();
+  sim.api.drawChargerSpark(sample, false);
+  const charger = sim.draws.map((d) => d.fn);
+  assert(JSON.stringify(heavy) !== JSON.stringify(charger), "Heavy and Charger collapsed to one silhouette");
+  assert(heavy.filter((fn) => fn === "box").length === 2, "Heavy lost its two split cores");
+  assert(charger.includes("bar") && charger.includes("box"), "Charger lost its needle-and-tail shape");
+
+  sim.clearDraws();
+  sim.api.drawPixelTitle();
+  assert(sim.draws.filter((d) => d.fn === "rect").length > 40, "pixel title did not draw a full VOLT mark");
+});
+
+check("ATTRACT combines the pixel VOLT mark with one KEEPER subtitle", () => {
+  const sim = loadGame({ seed: 5154 });
+  sim.clearDraws();
+  sim.step([]);
+  const texts = sim.draws.filter((d) => d.fn === "text").map((d) => d.text);
+  assert(texts.includes("KEEPER"), "ATTRACT lost the KEEPER subtitle");
+  assert(!texts.includes("VOLT KEEPER"), "ATTRACT duplicated VOLT in its subtitle");
+});
+
+check("EXTEND assembles only an actually added reserve and returns to rest", () => {
+  const sim = loadGame({ seed: 5153 });
+  sim.startPlay();
+  sim.api.injectScore(20000);
+  sim.step([]);
+  assert(sim.api.state().lives === 4 && sim.api.state().extendBuildTimer > 0, "awarded reserve did not begin assembly");
+  sim.clearDraws();
+  sim.api.drawLivesHud();
+  assert(sim.draws.some((d) => d.fn === "rect" || d.fn === "box"), "assembly did not draw Probe parts");
+  for (let i = 0; i < sim.api.EXTEND_BUILD_FRAMES; i++) sim.api.drawLivesHud();
+  sim.clearDraws();
+  sim.api.drawLivesHud();
+  const settled = sim.draws.filter((d) => d.fn === "char" && d.text === sim.api.PROBE_FRAME_A);
+  assert(settled.length === 3 && sim.api.state().extendBuildTimer === 0, "assembled reserve did not settle to three icons");
+
+  sim.api.setLives(5);
+  sim.api.injectScore(500000);
+  sim.step([]);
+  assert(sim.api.state().extendBuildTimer === 0, "thresholds crossed at the life cap fabricated an assembly");
+});
+
+check("the runtime visual contract keeps HUD roles distinct from gameplay colours", () => {
+  const v = api.VISUAL;
+  assert(v.theme === "dark" && v.background === "#090c1b", "the renderer must declare the theme it was audited on");
+  assert(v.text.primary === "black", "primary state should use the dark theme's near-white ink");
+  assert(v.text.energy === "cyan", "energy information must keep the keeper's cyan role");
+  assert(v.text.reward === "green" && v.text.rewardScore === "yellow", "reward roles must remain distinct");
+  assert(v.text.danger === "red", "danger and loss must use red");
+  assert(v.text.secondary === "light_black", "only secondary information should use the half-bright neutral");
+  assert(v.probe.frameA === "c" && v.probe.frameB === "d", "visual contract lost the two Probe frames");
+  assert(v.probe.worldScale === 2 && v.probe.hudScale === 1 && v.probe.hudMaxIcons === 4, "Probe scale contract drifted");
+  assert(
+    v.hud.waveMeterBounds.left === 149 && v.hud.waveMeterBounds.right === 208,
+    "wave meter boundary anchors drifted"
+  );
+  assert(new Set(Object.values(v.text)).size >= 5, "text roles collapsed into too few colours");
+  for (const key of ["score", "hiScore", "multiplier", "wave", "lives"]) {
+    const p = v.hud[key];
+    assert(p && Number.isFinite(p.x) && Number.isFinite(p.y), `${key} is missing a runtime-readable HUD anchor`);
+  }
+});
+
+check("the quota and clock use paired neutral boundary ticks", () => {
+  const sim = loadGame({ seed: 6007 });
+  sim.startPlay();
+  sim.clearDraws();
+  sim.step([]);
+  const bounds = api.VISUAL.hud.waveMeterBounds;
+  const ticks = sim.draws.filter(
+    (d) =>
+      d.fn === "rect" &&
+      (d.x === bounds.left || d.x === bounds.right) &&
+      d.y === bounds.top &&
+      d.w === 1 &&
+      d.h === bounds.bottom - bounds.top
+  );
+  assert(ticks.length === 2, `expected two wave-meter boundary ticks, saw ${ticks.length}`);
+  assert(ticks.every((d) => d.color === api.VISUAL.instrument.structure), "wave-meter boundaries lost their neutral role");
+});
+
+check("HI score is readable primary ink and turns yellow for a live record", () => {
+  const sim = loadGame({ seed: 6008 });
+  sim.clearDraws();
+  sim.step([]);
+  let hi = sim.draws.find((d) => d.fn === "text" && d.text.startsWith("HI "));
+  assert(hi?.color === api.VISUAL.text.primary, `inactive HI used ${hi?.color} instead of primary ink`);
+
+  sim.startPlay();
+  sim.api.injectScore(100);
+  sim.clearDraws();
+  sim.step([]);
+  hi = sim.draws.find((d) => d.fn === "text" && d.text.startsWith("HI "));
+  assert(hi?.color === api.VISUAL.text.rewardScore, `record HI used ${hi?.color} instead of reward yellow`);
+});
+
+check("important text never falls back to low-contrast light colours", () => {
+  const sim = loadGame({ seed: 6006 });
+  const forbidden = new Set(["white", "light_cyan", "light_red", "light_green", "light_blue", "light_purple"]);
+  const phases = new Set();
+  for (let f = 0; f < 12000; f++) {
+    sim.clearDraws();
+    if (f === 2) sim.step(["KeyZ"]);
+    else sim.step(f % 95 === 0 ? ["KeyZ"] : []);
+    phases.add(sim.api.state().phase);
+    for (const d of sim.draws) {
+      if (d.fn === "text") assert(!forbidden.has(d.color), `${d.text} used low-contrast ${d.color}`);
+    }
+    if (phases.has("attract") && phases.has("ready") && phases.has("play") && phases.has("gameover")) break;
+  }
+  assert(phases.has("ready") && phases.has("play"), `text audit missed active phases: ${[...phases].join(",")}`);
+});
+
+check("a normal spark is an animated directed discharge inside its contact envelope", () => {
+  const s = { x: 100, y: 100, dx: Math.SQRT1_2, dy: -Math.SQRT1_2 };
+  const signatures = new Set();
+  for (let tick = 0; tick < 3; tick++) {
+    game.clearDraws();
+    game.sandbox.ticks = tick;
+    api.drawNormalSpark(s, false);
+    const glyph = game.draws.slice();
+    assert(glyph.filter((d) => d.fn === "bar").length === 2, "spark needs a core and a side discharge");
+    assert(glyph.some((d) => d.fn === "box" && d.w <= 3), "spark needs a compact leading edge");
+    assert(!glyph.some((d) => d.fn === "box" && d.w === 6), "the old yellow square silhouette returned");
+    assert(glyph.every((d) => d.color === "yellow" || d.color === "light_yellow"), "normal spark left its power palette");
+    for (const d of glyph) {
+      assert(Math.abs(d.x - s.x) <= 5.5 && Math.abs(d.y - s.y) <= 5.5, "spark draw escaped its 12x12 contact envelope");
+    }
+    signatures.add(glyph.map((d) => `${d.fn}:${d.len || d.w}:${d.x.toFixed(2)}:${d.y.toFixed(2)}`).join("|"));
+  }
+  assert(signatures.size === 3, `expected three spark beats, saw ${signatures.size}`);
 });
 
 check("the low-capacitor warning is visible, not only audible", () => {

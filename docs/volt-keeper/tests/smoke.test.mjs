@@ -21,7 +21,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const server = createServer();
 await new Promise((resolve) => server.listen(PORT, resolve));
 
-const browser = await chromium.launch();
+const browser = await chromium.launch({
+  // CI normally uses Playwright's pinned browser. A preinstalled browser can
+  // be selected explicitly in offline environments without downloading one.
+  executablePath: process.env.VK_BROWSER_PATH || undefined,
+});
 const page = await browser.newPage();
 
 page.on("console", (msg) => {

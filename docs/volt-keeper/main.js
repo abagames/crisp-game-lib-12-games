@@ -44,6 +44,44 @@ llllll
  l  l
 l    l
 `,
+  // Capacitor Probe, Frame A. The terminal, face-like gap and grounding bus
+  // stay fixed; only one internal current cell alternates left/right. The cyan
+  // cells are recoloured by char() for recovery; spaces remain transparent.
+  `
+ cccc
+cccccc
+cc  cc
+cccccc
+cc ccc
+cccccc
+`,
+  // Capacitor Probe, Frame B. Grounding locks to this right-shifted current.
+  `
+ cccc
+cccccc
+cc  cc
+cccccc
+ccc cc
+cccccc
+`,
+  // Spark port, dormant and charged. Both point right and are rotated inward
+  // at the field edge; the charged frame opens a bright current gap.
+  `
+  ll
+ llll
+ll  ll
+ll  ll
+ llll
+  ll
+`,
+  `
+  rr
+ rrrr
+rr rr
+rr rr
+ rrrr
+  rr
+`,
 ];
 
 options = {
@@ -72,7 +110,65 @@ const BAR = { x: 8, y: 16, w: 240, h: 6 };
 // Nothing that depletes is drawn next to the bar that kills you any more.
 const QUOTA_BAR = { x: 150, y: 8, w: 58, h: 3 };
 const CLOCK_BAR = { x: 150, y: 12, w: 58, h: 2 };
+const WAVE_METER_BOUNDS = {
+  left: QUOTA_BAR.x - 1,
+  right: QUOTA_BAR.x + QUOTA_BAR.w,
+  top: QUOTA_BAR.y,
+  bottom: CLOCK_BAR.y + CLOCK_BAR.h,
+};
 const CLOCK_WARN_FRAMES = 300; // the last five seconds flash
+const PROBE_FRAME_A = "c";
+const PROBE_FRAME_B = "d";
+const PROBE_ANIMATION_FRAMES = 10;
+const HUD_LIFE_ICONS = 4;
+const PORT_FRAME_IDLE = "e";
+const PORT_FRAME_CHARGED = "f";
+const EXTEND_BUILD_FRAMES = 18;
+
+// Runtime-readable presentation contract. These roles are deliberately HUD
+// only: gameplay silhouettes keep their own colours so presentation changes
+// cannot alter or disguise a collision-bearing draw. In crisp-game-lib's dark
+// theme `black` is the near-white primary ink, while every `light_*` colour is
+// its base at half brightness. Only high-contrast light_black remains, and only
+// for secondary instrument marks.
+const VISUAL = {
+  phrase: "a live electrical instrument panel under load",
+  theme: "dark",
+  background: "#090c1b",
+  probe: {
+    frameA: PROBE_FRAME_A,
+    frameB: PROBE_FRAME_B,
+    animationFrames: PROBE_ANIMATION_FRAMES,
+    worldScale: 2,
+    hudScale: 1,
+    hudGap: 7,
+    hudMaxIcons: HUD_LIFE_ICONS,
+  },
+  text: {
+    primary: "black",
+    energy: "cyan",
+    secondary: "light_black",
+    danger: "red",
+    warning: "yellow",
+    reward: "green",
+    rewardScore: "yellow",
+  },
+  instrument: {
+    structure: "light_black",
+    charge: "green",
+    time: "blue",
+    danger: "red",
+    warning: "yellow",
+  },
+  hud: {
+    score: { x: 4, y: 3 },
+    hiScore: { x: 200, y: 3 },
+    multiplier: { x: 8, y: 10 },
+    wave: { x: 92, y: 10 },
+    lives: { x: 216, y: 10 },
+    waveMeterBounds: WAVE_METER_BOUNDS,
+  },
+};
 
 /* -------------------------------------------------- direction lattice (12) */
 
@@ -121,8 +217,11 @@ const ARROW_DIRS = [
 ].map(
   ([sx, sy]) =>
     DIRS.filter(
-      (d) => Math.sign(d.x) === sx && Math.sign(d.y) === sy && Math.abs(Math.abs(d.x) - Math.abs(d.y)) < 1e-9
-    )[0]
+      (d) =>
+        Math.sign(d.x) === sx &&
+        Math.sign(d.y) === sy &&
+        Math.abs(Math.abs(d.x) - Math.abs(d.y)) < 1e-9,
+    )[0],
 );
 
 /** The arrow direction pointing from (x,y) toward (tx,ty). */
@@ -154,7 +253,18 @@ function snapDir(x, y, nx, ny) {
  * one shared frame, which is why they read as noise rather than as a machine.
  */
 function arrow(x, y, dir, spin = 0, phase = 0) {
-  return { x, y, kind: "arrow", dir: ((dir % 4) + 4) % 4, spin, phase, disabledUntil: -1, flash: 0 };
+  return {
+    x,
+    y,
+    kind: "arrow",
+    dir: ((dir % 4) + 4) % 4,
+    spin,
+    phase,
+    disabledUntil: -1,
+    flash: 0,
+    wasDisabled: false,
+    restoreFlash: 0,
+  };
 }
 /**
  * A bumper reflects off its surface normal and adds speed. It is the deliberate
@@ -164,7 +274,15 @@ function arrow(x, y, dir, spin = 0, phase = 0) {
  * one screen; a board of only one kind gives the player nothing to compare.
  */
 function bumper(x, y) {
-  return { x, y, kind: "bumper", disabledUntil: -1, flash: 0 };
+  return {
+    x,
+    y,
+    kind: "bumper",
+    disabledUntil: -1,
+    flash: 0,
+    wasDisabled: false,
+    restoreFlash: 0,
+  };
 }
 
 const FAMILIES = [
@@ -269,7 +387,7 @@ const FAMILIES = [
       const dy = rndi(0, 25) - 12;
       const out = [];
       [48 + dx, 208 - dx].forEach((x) =>
-        [74 + dy, 124, 174 - dy].forEach((y) => out.push(bumper(x, y)))
+        [74 + dy, 124, 174 - dy].forEach((y) => out.push(bumper(x, y))),
       );
       // Two arrows on the centre line feed the bumper walls. Standing between a
       // piece that chooses a direction and a piece that merely returns one is
@@ -295,7 +413,9 @@ const FAMILIES = [
       for (let i = 0; i < 5; i++) {
         // A rake laid across the current rather than a queue along it.
         const t = (i - 2) * 30;
-        out.push(arrow(CX - v.y * t - v.x * 40 + jx, CY + v.x * t - v.y * 40 + jy, d));
+        out.push(
+          arrow(CX - v.y * t - v.x * 40 + jx, CY + v.x * t - v.y * 40 + jy, d),
+        );
       }
       // Downstream, where the current empties: the only pieces on the board
       // that can send it back, and the reason the flow is a loop not a drain.
@@ -319,7 +439,15 @@ const FAMILIES = [
       const out = [];
       for (let i = 0; i < n; i++) {
         const a = a0 + (i * PI * 2) / n;
-        out.push(arrow(CX + Math.cos(a) * r, CY + Math.sin(a) * r, rndi(4), spin, i / n));
+        out.push(
+          arrow(
+            CX + Math.cos(a) * r,
+            CY + Math.sin(a) * r,
+            rndi(4),
+            spin,
+            i / n,
+          ),
+        );
       }
       out.push(bumper(CX, CY - 78));
       out.push(bumper(CX, CY + 78));
@@ -346,8 +474,9 @@ const PORTS = [
 /* --------------------------------------------------------------- difficulty */
 
 function diff(w) {
+  const finale = w === CAMPAIGN.finalWave;
   return {
-    sparkCount: Math.min(12, 3 + w),
+    sparkCount: finale ? 12 : Math.min(12, 3 + w),
     sparkSpeed: Math.min(3.0, 1.2 + 0.08 * w),
     // Drain has to be read against income, not against the bar: measured play
     // banks 4.5 energy/s (36.7 absorbs/min, 3.5 per ground), so the old
@@ -362,7 +491,7 @@ function diff(w) {
     // so past wave 12 a rising drain would be a wall no amount of skill could
     // answer, which is a clock, not a difficulty curve.
     drainPerFrame: Math.min(10.0, 4.0 + 0.5 * w) / 60,
-    heavyRatio: Math.min(0.3, 0.05 * w),
+    heavyRatio: finale ? 0.3 : Math.min(0.3, 0.05 * w),
     // Wave 5 put the scavenger past where runs end: it appeared in 3 of 12
     // measured runs, six times in twenty minutes of play. It is the only thing
     // that can take a piece off the board, so it has to be somewhere a run
@@ -371,7 +500,7 @@ function diff(w) {
     // was measured and rejected: it cost 20 points of exposure (58% of runs
     // down to 38%) and bought nothing else.
     scavPeriod: w >= 3 ? Math.max(420, 1200 - 60 * w) : Infinity,
-    chargerRatio: w >= 8 ? Math.min(0.2, 0.03 * (w - 7)) : 0,
+    chargerRatio: finale ? 0.25 : w >= 8 ? Math.min(0.2, 0.03 * (w - 7)) : 0,
     // Unlock pace, set from measured reach rather than from intent. Twelve
     // piloted runs ended at a median of wave 4 and never once passed wave 6,
     // so a schedule that opened the last families at waves 6 and 8 was shipping
@@ -386,7 +515,10 @@ function diff(w) {
 
 /** Energy the wave demands: most of what it will drain over its full length. */
 function quotaFor(w) {
-  return Math.round(diff(w).drainPerFrame * WAVE_FRAMES * QUOTA_RATIO);
+  const finalScale = w === CAMPAIGN.finalWave ? CAMPAIGN.finalQuotaScale : 1;
+  return Math.round(
+    diff(w).drainPerFrame * WAVE_FRAMES * QUOTA_RATIO * finalScale,
+  );
 }
 
 /* -------------------------------------------------------------- game state */
@@ -423,9 +555,17 @@ let phase;
 let phaseTimer;
 let gameScore;
 let hiScore;
+let injectedScorePending;
 let popups;
 let attractCard;
 let barFlash;
+let nearMissFlash;
+let nearMissAngle;
+let impactFlash;
+let surgePulse;
+let extendCount;
+let extendBuildTimer;
+let finalScoreSaved;
 
 const GROUND_FRAMES = 30;
 // The recovery window is the price of committing to a ground. It is kept short
@@ -437,6 +577,41 @@ const GROUND_SPEED = 0.35;
 const READY_FRAMES = 100;
 const MISS_FRAMES = 90;
 const GAMEOVER_FRAMES = 260;
+const FINAL_CLEAR_FRAMES = 360;
+const CEREMONY_INPUT_GRACE = 60;
+const MAX_LIVES = 5;
+const EARLY_EXTEND_THRESHOLDS = [20000, 50000];
+const REPEATING_EXTEND_START = 100000;
+const REPEATING_EXTEND_INTERVAL = 100000;
+
+/** Threshold after `count` EXTENDs have already been consumed. */
+function nextExtendThreshold(count) {
+  if (count < EARLY_EXTEND_THRESHOLDS.length)
+    return EARLY_EXTEND_THRESHOLDS[count];
+  return (
+    REPEATING_EXTEND_START +
+    (count - EARLY_EXTEND_THRESHOLDS.length) * REPEATING_EXTEND_INTERVAL
+  );
+}
+
+/** Number of thresholds represented by an injected historical score. */
+function extendCountForScore(score) {
+  if (score < EARLY_EXTEND_THRESHOLDS[0]) return 0;
+  if (score < EARLY_EXTEND_THRESHOLDS[1]) return 1;
+  if (score < REPEATING_EXTEND_START) return 2;
+  return (
+    EARLY_EXTEND_THRESHOLDS.length +
+    Math.floor(score / REPEATING_EXTEND_INTERVAL)
+  );
+}
+// One finite run with a single terminal boundary. The finale changes composition through
+// existing levers: a fixed mixed terrain board, the full enemy roster, and a
+// 15% higher throughput quota. It does not add a new rule or art asset.
+const CAMPAIGN = {
+  finalWave: 17,
+  finalQuotaScale: 1.15,
+  finalFamily: "FINALE",
+};
 const HI_SCORE_KEY = "voltKeeper.hiScore";
 const RING_R = 22;
 // The scavenger crosses ground faster than the keeper (1.25) on purpose, so it
@@ -507,6 +682,47 @@ const TALLY_FRAMES = 36;
 const QUOTA_RATIO = 1.2;
 const WAVE_BATTERY_SHORT = 40;
 
+/* ------------------------------------------------------- feedback budgets */
+
+// The game uses its shapes as collision geometry, so feel is layered around
+// the authoritative silhouettes rather than deforming them. Every effect below
+// is either a short scalar timer or a bounded crisp-game-lib particle burst;
+// there is no game-owned particle/trail collection that can accumulate.
+const FEEL = {
+  frameParticleCap: 48,
+  moveBurst: 3,
+  groundBurst: 8,
+  spawnBurst: 5,
+  deflectBurst: 2,
+  bumperBurst: 4,
+  wallBurst: 2,
+  absorbBurst: 8,
+  heavyAbsorbBurst: 16,
+  chargerAbsorbBurst: 12,
+  scavengerBurst: 10,
+  missBurst: 24,
+  surgeBurst: 18,
+  nearRadius: 15,
+};
+let feelParticleTick = -1;
+let feelParticlesThisFrame = 0;
+
+/** Emit a bounded particle burst with an explicit colour. */
+function burst(x, y, c, opts) {
+  if (feelParticleTick !== ticks) {
+    feelParticleTick = ticks;
+    feelParticlesThisFrame = 0;
+  }
+  const count = Math.min(
+    opts.count,
+    Math.max(0, FEEL.frameParticleCap - feelParticlesThisFrame),
+  );
+  if (count <= 0) return;
+  feelParticlesThisFrame += count;
+  color(c);
+  particle(vec(x, y), Object.assign({}, opts, { count }));
+}
+
 /* ------------------------------------------------------------------- audio */
 
 const audio = {
@@ -526,7 +742,8 @@ function setupAudio(activated) {
     // whatever the player switched to.
     if (typeof document !== "undefined" && document.addEventListener) {
       document.addEventListener("visibilitychange", () => {
-        if (audio.bus) audio.bus.setPaused(document.visibilityState === "hidden");
+        if (audio.bus)
+          audio.bus.setPaused(document.visibilityState === "hidden");
       });
     }
   }
@@ -560,7 +777,9 @@ function pickFamily(w) {
   // breather, which was affordable when a run lasted 8-13 waves; at a measured
   // median of 4 it means spending a quarter of a run on an empty field, and the
   // terrain is the part of the game with something to learn.
-  const eligible = FAMILIES.filter((f) => f.id !== "OPEN" && f.conc <= diff(w).concentrationCap);
+  const eligible = FAMILIES.filter(
+    (f) => f.id !== "OPEN" && f.conc <= diff(w).concentrationCap,
+  );
   const key = eligible.map((f) => f.id).join(",");
   if (key !== familyBagKey || familyBag.length === 0) {
     familyBagKey = key;
@@ -618,9 +837,37 @@ function buildLayout(w) {
     currentFamily = "OPEN";
     return [];
   }
+  if (w === CAMPAIGN.finalWave) {
+    // A compact, symmetric final board made solely from the two established
+    // terrain pieces. The four arrows form the familiar readable circuit;
+    // the corner bumpers disturb incoming traffic before it joins that loop.
+    // Fixed geometry makes WAVE 17 recognisable and probeable at a glance.
+    currentFamily = CAMPAIGN.finalFamily;
+    lastFamilyId = CAMPAIGN.finalFamily;
+    const r = 58;
+    const pts = [
+      [CX, CY - r],
+      [CX + r, CY],
+      [CX, CY + r],
+      [CX - r, CY],
+    ];
+    const out = pts.map(([x, y], i) => {
+      const [nx, ny] = pts[(i + 1) % 4];
+      return arrow(x, y, dirToward(x, y, nx, ny));
+    });
+    for (const [x, y] of [
+      [CX - 72, CY - 72],
+      [CX + 72, CY - 72],
+      [CX + 72, CY + 72],
+      [CX - 72, CY + 72],
+    ])
+      out.push(bumper(x, y));
+    return out;
+  }
   // Wave 2 is not drawn from the bag: it is the one board whose job is to be
   // understood rather than survived.
-  const family = w === 2 ? FAMILIES.filter((f) => f.id === "CIRCUIT")[0] : pickFamily(w);
+  const family =
+    w === 2 ? FAMILIES.filter((f) => f.id === "CIRCUIT")[0] : pickFamily(w);
   if (w === 2) lastFamilyId = "CIRCUIT";
   currentFamily = family.id;
   const list = family.build(w);
@@ -640,7 +887,8 @@ function buildLayout(w) {
   }
   for (const r of list) {
     if (r.kind !== "arrow" || r.spin) continue;
-    for (let turn = 0; turn < 4 && facesAnother(r, list); turn++) r.dir = (r.dir + 1) % 4;
+    for (let turn = 0; turn < 4 && facesAnother(r, list); turn++)
+      r.dir = (r.dir + 1) % 4;
   }
   return list;
 }
@@ -649,7 +897,10 @@ function buildLayout(w) {
 
 function loadHiScore() {
   try {
-    const raw = typeof localStorage !== "undefined" ? localStorage.getItem(HI_SCORE_KEY) : null;
+    const raw =
+      typeof localStorage !== "undefined"
+        ? localStorage.getItem(HI_SCORE_KEY)
+        : null;
     const value = raw == null ? 0 : parseInt(raw, 10);
     return Number.isFinite(value) && value > 0 ? value : 0;
   } catch (e) {
@@ -660,10 +911,14 @@ function loadHiScore() {
 function saveHiScore() {
   // Never written from attract mode: a demo run must not rewrite the table.
   if (phase === "attract") return;
-  if (gameScore <= hiScore) return;
+  // `payScore` advances the in-memory hi-score during play.  At game over
+  // the score and hi-score are therefore equal for a new record, but the
+  // persisted value may still be stale.
+  if (gameScore < hiScore) return;
   hiScore = gameScore;
   try {
-    if (typeof localStorage !== "undefined") localStorage.setItem(HI_SCORE_KEY, String(hiScore));
+    if (typeof localStorage !== "undefined")
+      localStorage.setItem(HI_SCORE_KEY, String(hiScore));
   } catch (e) {
     /* storage unavailable: the session hi-score still stands */
   }
@@ -673,12 +928,33 @@ function saveHiScore() {
 function payScore(points) {
   gameScore += points;
   if (gameScore > hiScore && phase !== "attract") hiScore = gameScore;
+
+  // Demo score is deliberately ephemeral.  During the final-clear tally the
+  // thresholds are consumed so no stale award can fire later, but lives and
+  // fanfare are meaningless once the campaign has ended and stay suppressed.
+  if (phase === "attract") return;
+  let earned = 0;
+  while (gameScore >= nextExtendThreshold(extendCount)) {
+    extendCount++;
+    earned++;
+  }
+  if (earned <= 0 || phase === "finalclear") return;
+  const beforeLives = lives;
+  lives = Math.min(MAX_LIVES, lives + earned);
+  if (lives > beforeLives) extendBuildTimer = EXTEND_BUILD_FRAMES;
+  banner("EXTEND +" + earned, "extend", 90);
+  audio.emit("keeper:extend");
 }
 
 function award(points, x, y) {
   payScore(points);
   popups.push({ x, y, text: String(points), life: 42, kind: "score" });
   if (popups.length > 32) popups.shift();
+}
+
+/** Queue debug/probe score so it enters through the real frame-owned audio bus. */
+function injectScore(points) {
+  injectedScorePending += Math.max(0, Math.floor(points));
 }
 
 function pad7(v) {
@@ -689,7 +965,20 @@ function pad7(v) {
 /* ------------------------------------------------------------ run lifecycle */
 
 function initGame() {
-  keeper = { x: CX, y: CY, state: "free", timer: 0, invuln: 0 };
+  keeper = {
+    x: CX,
+    y: CY,
+    state: "free",
+    timer: 0,
+    invuln: 0,
+    moveX: 0,
+    moveY: 0,
+    wasMoving: false,
+    moveFlash: 0,
+    stopFlash: 0,
+    groundFlash: 0,
+    facing: 0,
+  };
   sparks = [];
   scavengers = [];
   pending = [];
@@ -717,8 +1006,16 @@ function initGame() {
   currentFamily = "OPEN";
   missPending = false;
   gameScore = 0;
+  injectedScorePending = 0;
   popups = [];
   barFlash = 0;
+  nearMissFlash = 0;
+  nearMissAngle = 0;
+  impactFlash = 0;
+  surgePulse = 0;
+  extendCount = 0;
+  extendBuildTimer = 0;
+  finalScoreSaved = false;
   pieces = buildLayout(wave);
 }
 
@@ -749,12 +1046,130 @@ function restartDemo() {
   phaseTimer = 0;
 }
 
+/** Prepare the existing quota/battery/score settlement exactly once. */
+function prepareWaveSettlement() {
+  waveTimer = 0;
+  tallyCharge = Math.max(0, capacitor);
+  waveBonus = Math.round(tallyCharge) * 20 * multiplier;
+  tallyPaid = 0;
+  tallyTimer = TALLY_FRAMES;
+  quotaCleared = quotaMet;
+  capacitor = quotaCleared ? WAVE_BATTERY : WAVE_BATTERY_SHORT;
+  barFlash = TALLY_FRAMES + 8;
+}
+
+/** Advance only after a ceremony has finished; no WAVE 18 can be created. */
+function beginWave(nextWave, withReady) {
+  wave = nextWave;
+  waveTimer = 0;
+  waveBanked = 0;
+  quotaMet = false;
+  waveQuota = quotaFor(wave);
+  surgeTimer = withReady ? 0 : SURGE_FRAMES;
+  if (withReady) pieces = buildLayout(wave);
+  sparks = [];
+  scavengers = [];
+  pending = [];
+  scavTimer = 0;
+  warnTimer = 0;
+  keeper.state = "free";
+  keeper.timer = 0;
+  keeper.invuln = Math.max(keeper.invuln, withReady ? READY_FRAMES : 0);
+  if (withReady) {
+    phase = "ready";
+    phaseTimer = READY_FRAMES;
+  }
+}
+
+function settleWaveBonus() {
+  if (tallyTimer <= 0) return;
+  tallyTimer--;
+  const target =
+    tallyTimer > 0
+      ? Math.round(waveBonus * (1 - tallyTimer / TALLY_FRAMES))
+      : waveBonus;
+  payScore(target - tallyPaid);
+  tallyPaid = target;
+}
+
+function completeWave() {
+  prepareWaveSettlement();
+
+  // Attract mode demonstrates the campaign core without entering or mutating
+  // the campaign ceremonies. Its run is discarded on death as before, and a
+  // demo that reaches the finite endpoint restarts instead of inventing WAVE 18.
+  if (phase === "attract") {
+    if (wave >= CAMPAIGN.finalWave) {
+      restartDemo();
+      return;
+    }
+    beginWave(wave + 1, false);
+    phase = "attract";
+    audio.emit("wave:surge");
+    return;
+  }
+
+  if (wave === CAMPAIGN.finalWave) {
+    phase = "finalclear";
+    phaseTimer = FINAL_CLEAR_FRAMES;
+    finalScoreSaved = false;
+    // Frozen ceremonies do not age world popups.  Do not let a legitimate
+    // earlier score EXTEND survive into the final screen where it is meaningless.
+    remove(popups, (popup) => popup.kind === "extend");
+    audio.emit("game:clear");
+    if (audio.bus) audio.bus.stopBgm();
+    return;
+  }
+
+  beginWave(wave + 1, false);
+  surgePulse = 24;
+  burst(keeper.x, keeper.y, "green", {
+    count: FEEL.surgeBurst,
+    speed: 2.2,
+    angle: 0,
+    angleWidth: PI * 2,
+  });
+  audio.emit("wave:surge");
+}
+
+/** Minimal maintained browser/test contract for deterministic high-wave probes. */
+function injectWaveEnd(w, options) {
+  const o = options || {};
+  if (phase === "attract") startRun();
+  phase = "play";
+  wave = clamp(Math.floor(w), 1, CAMPAIGN.finalWave);
+  waveTimer = WAVE_FRAMES - 1;
+  waveBanked = o.quotaMet === false ? 0 : quotaFor(wave);
+  waveQuota = quotaFor(wave);
+  quotaMet = o.quotaMet !== false;
+  capacitor = o.capacitor == null ? 70 : clamp(o.capacitor, 1, 100);
+  if (o.lives != null) lives = clamp(Math.floor(o.lives), 1, MAX_LIVES);
+  if (o.score != null) {
+    gameScore = Math.max(0, Math.floor(o.score));
+    // Injected score describes history, so thresholds already below it are
+    // considered consumed without fabricating lives, notices, or audio.
+    extendCount = extendCountForScore(gameScore);
+  }
+  pieces = buildLayout(wave);
+  sparks = [];
+  scavengers = [];
+  pending = [];
+  scavTimer = 1e9;
+  keeper.invuln = 9999;
+  missPending = false;
+  return wave;
+}
+
 /* ---------------------------------------------------------- input bindings */
 
-const moveLeft = () => keyboard.code.ArrowLeft.isPressed || keyboard.code.KeyA.isPressed;
-const moveRight = () => keyboard.code.ArrowRight.isPressed || keyboard.code.KeyD.isPressed;
-const moveUp = () => keyboard.code.ArrowUp.isPressed || keyboard.code.KeyW.isPressed;
-const moveDown = () => keyboard.code.ArrowDown.isPressed || keyboard.code.KeyS.isPressed;
+const moveLeft = () =>
+  keyboard.code.ArrowLeft.isPressed || keyboard.code.KeyA.isPressed;
+const moveRight = () =>
+  keyboard.code.ArrowRight.isPressed || keyboard.code.KeyD.isPressed;
+const moveUp = () =>
+  keyboard.code.ArrowUp.isPressed || keyboard.code.KeyW.isPressed;
+const moveDown = () =>
+  keyboard.code.ArrowDown.isPressed || keyboard.code.KeyS.isPressed;
 const actionPressed = () =>
   keyboard.code.Space.isJustPressed ||
   keyboard.code.KeyZ.isJustPressed ||
@@ -789,8 +1204,11 @@ function makeSpark(x, y, d, speed, type, extra) {
       volts: 0,
       ignoreRef: null,
       ignoreUntil: 0,
+      spawnFlash: 0,
+      nearKeeper: false,
+      nearMinDist2: Infinity,
     },
-    extra
+    extra,
   );
 }
 
@@ -812,7 +1230,19 @@ function spawnSpark(port, type) {
   const d = snapDir(inward.x, inward.y, inward.x, inward.y);
   const speed = diff(wave).sparkSpeed * (type === "heavy" ? 0.6 : 1);
   // Start clear of the wall so the first frame is travel, not an instant bounce.
-  sparks.push(makeSpark(port.x + d.x * 10, port.y + d.y * 10, d, speed, type));
+  const s = makeSpark(port.x + d.x * 10, port.y + d.y * 10, d, speed, type, {
+    spawnFlash: 10,
+  });
+  sparks.push(s);
+  // The warning square announces the port; this short inward streak confirms
+  // the exact frame danger becomes live. Red is reserved for danger, and the
+  // five-particle cap keeps twelve busy ports from becoming a curtain.
+  burst(s.x, s.y, "light_red", {
+    count: FEEL.spawnBurst,
+    speed: 1.0,
+    angle: Math.atan2(d.y, d.x),
+    angleWidth: 0.7,
+  });
 }
 
 function schedulePort() {
@@ -847,6 +1277,12 @@ function deflectSpark(s) {
       s.y = r.y + ny * 10;
       s.speed = Math.min(4.0, s.speed + 0.2);
       r.flash = 6;
+      burst(r.x + nx * 8, r.y + ny * 8, "light_green", {
+        count: FEEL.bumperBurst,
+        speed: 1.2,
+        angle: Math.atan2(s.dy, s.dx),
+        angleWidth: 0.8,
+      });
       audio.emit("spark:bumper");
     } else {
       if (Math.abs(s.x - r.x) > 6 || Math.abs(s.y - r.y) > 6) continue;
@@ -878,6 +1314,12 @@ function deflectSpark(s) {
       // a spark bank volts by grazing one piece over and over.
       if (s.volts < VOLT_CAP) s.volts++;
       r.flash = 5;
+      burst(r.x, r.y, "cyan", {
+        count: FEEL.deflectBurst,
+        speed: 0.7,
+        angle: Math.atan2(v.y, v.x),
+        angleWidth: 0.35,
+      });
       audio.emit("spark:deflect");
       return;
     }
@@ -909,6 +1351,17 @@ function bounceWalls(s) {
     hit = true;
   }
   if (hit && s.type === "charger") s.speed = Math.min(5.0, s.speed + 0.25);
+  // Ordinary wall bounces stay quiet. Only a high-speed/accelerating spark
+  // earns this two-pixel scrape, so the feedback clarifies dangerous velocity
+  // instead of making the frame chatter continuously.
+  if (hit && (s.type === "charger" || s.speed >= 3)) {
+    burst(s.x, s.y, "light_red", {
+      count: FEEL.wallBurst,
+      speed: 0.8,
+      angle: Math.atan2(-s.dy, -s.dx),
+      angleWidth: 0.45,
+    });
+  }
 }
 
 /* ------------------------------------------------------------------ economy */
@@ -932,7 +1385,14 @@ function banner(s, kind, life) {
     return;
   }
   const lane = popups.reduce((n, p) => n + (p.banner ? 1 : 0), 0);
-  popups.push({ x: CX, y: BANNER.y + lane * BANNER.step, text: s, life, kind, banner: true });
+  popups.push({
+    x: CX,
+    y: BANNER.y + lane * BANNER.step,
+    text: s,
+    life,
+    kind,
+    banner: true,
+  });
 }
 
 /**
@@ -957,7 +1417,13 @@ function addEnergy(v, x, y) {
   const px = x == null ? keeper.x : x;
   const py = y == null ? keeper.y : y;
   if (gained >= 0.5) {
-    popups.push({ x: px, y: py, text: "+" + Math.round(gained), life: 40, kind: "energy" });
+    popups.push({
+      x: px,
+      y: py,
+      text: "+" + Math.round(gained),
+      life: 40,
+      kind: "energy",
+    });
     barFlash = 10;
   }
   const overflow = before + v - 100;
@@ -988,14 +1454,26 @@ function absorbSpark(s, index) {
     const away = Math.atan2(s.y - keeper.y, s.x - keeper.x);
     for (let k = 0; k < 2; k++) {
       const a = away + (k === 0 ? 0.9 : -0.9);
-      const d = snapDir(Math.cos(a), Math.sin(a), Math.cos(away), Math.sin(away));
+      const d = snapDir(
+        Math.cos(a),
+        Math.sin(a),
+        Math.cos(away),
+        Math.sin(away),
+      );
       // The children come out flat: a heavy's volts are cashed by the heavy,
       // and splitting is not a way to duplicate them.
       sparks.push(
-        makeSpark(s.x + d.x * (RING_R + 4), s.y + d.y * (RING_R + 4), d, s.speed * 1.2, "spark", {
-          ignoreUntil: ticks + 6,
-          immuneUntil: ticks + 45,
-        })
+        makeSpark(
+          s.x + d.x * (RING_R + 4),
+          s.y + d.y * (RING_R + 4),
+          d,
+          s.speed * 1.2,
+          "spark",
+          {
+            ignoreUntil: ticks + 6,
+            immuneUntil: ticks + 45,
+          },
+        ),
       );
     }
   } else if (s.type === "charger") {
@@ -1009,16 +1487,47 @@ function absorbSpark(s, index) {
   }
   if (multiplier >= 9) audio.emit("multiplier:max");
   multTimer = 0;
-  const points = Math.round((s.type === "charger" ? 300 : 100) * multiplier * volt);
+  const points = Math.round(
+    (s.type === "charger" ? 300 : 100) * multiplier * volt,
+  );
   award(points, s.x, s.y);
-  particle(vec(s.x, s.y), { count: 8, speed: 1.6, angle: 0, angleWidth: PI * 2 });
+  // Reward vocabulary: cyan/green radial glints, scaled by the value and
+  // consequence of the catch. This replaces an implicit particle colour that
+  // depended on whichever draw happened to set color() on the previous frame.
+  const absorbColor =
+    s.type === "heavy"
+      ? "green"
+      : s.type === "charger"
+        ? "light_green"
+        : "cyan";
+  const absorbCount =
+    s.type === "heavy"
+      ? FEEL.heavyAbsorbBurst
+      : s.type === "charger"
+        ? FEEL.chargerAbsorbBurst
+        : FEEL.absorbBurst;
+  burst(s.x, s.y, absorbColor, {
+    count: absorbCount,
+    speed: s.type === "heavy" ? 2.2 : s.type === "charger" ? 1.9 : 1.6,
+    angle: 0,
+    angleWidth: PI * 2,
+  });
   sparks.splice(index, 1);
 }
 
 function loseLife(reason) {
   lives--;
   audio.emit("keeper:miss");
-  particle(vec(keeper.x, keeper.y), { count: 24, speed: 2.4, angle: 0, angleWidth: PI * 2 });
+  // MISS is the strongest danger event: a red burst plus a short field-frame
+  // punch. The world geometry itself never moves, so collision and sightline
+  // stay honest during precision play.
+  burst(keeper.x, keeper.y, "red", {
+    count: FEEL.missBurst,
+    speed: 2.4,
+    angle: 0,
+    angleWidth: PI * 2,
+  });
+  impactFlash = 12;
   // Push every spark to its nearest wall so the respawn is never a re-death.
   for (const s of sparks) {
     const dl = s.x - FIELD.left;
@@ -1039,6 +1548,11 @@ function loseLife(reason) {
   keeper.timer = 0;
   keeper.invuln = 90;
   groundAbsorbs = 0;
+  nearMissFlash = 0;
+  for (const s of sparks) {
+    s.nearKeeper = false;
+    s.nearMinDist2 = Infinity;
+  }
   // The phase machine decides what a miss means; this function only reports it.
   missPending = true;
 }
@@ -1046,40 +1560,78 @@ function loseLife(reason) {
 /* --------------------------------------------------------------------- draw */
 
 function drawField() {
-  color("light_black");
+  const impact = impactFlash > 0;
+  color(impact && ticks % 4 < 2 ? "red" : "light_black");
   rect(FIELD.left - 1, FIELD.top - 1, FIELD.right - FIELD.left + 2, 1);
   rect(FIELD.left - 1, FIELD.bottom + 1, FIELD.right - FIELD.left + 2, 1);
   rect(FIELD.left - 1, FIELD.top - 1, 1, FIELD.bottom - FIELD.top + 3);
   rect(FIELD.right + 1, FIELD.top - 1, 1, FIELD.bottom - FIELD.top + 3);
+  if (impact) {
+    // A second inset frame reads as a brief camera punch without offsetting
+    // any gameplay silhouette. It contracts back to the normal field in 12f.
+    const inset = Math.max(1, Math.ceil(impactFlash / 4));
+    color(ticks % 4 < 2 ? "light_red" : "red");
+    rect(
+      FIELD.left + inset,
+      FIELD.top + inset,
+      FIELD.right - FIELD.left - inset * 2,
+      1,
+    );
+    rect(
+      FIELD.left + inset,
+      FIELD.bottom - inset,
+      FIELD.right - FIELD.left - inset * 2,
+      1,
+    );
+    impactFlash--;
+  }
 }
 
 function drawHud() {
+  const ink = VISUAL.text;
+  const meter = VISUAL.instrument;
+  const hud = VISUAL.hud;
   // Score is drawn here, not by the library: this is a game-owned cycle.
-  color("light_cyan");
-  text("SCORE " + pad7(gameScore), 4, 3, { isSmallText: true });
-  color(gameScore >= hiScore && gameScore > 0 ? "yellow" : "light_black");
-  text("HI " + pad7(hiScore), 200, 3, { isSmallText: true });
+  color(ink.energy);
+  text("SCORE " + pad7(gameScore), hud.score.x, hud.score.y, {
+    isSmallText: true,
+  });
+  color(gameScore >= hiScore && gameScore > 0 ? ink.rewardScore : ink.primary);
+  text("HI " + pad7(hiScore), hud.hiScore.x, hud.hiScore.y, {
+    isSmallText: true,
+  });
 
   // During the tally the bar shows the charge being spent, not the fresh
   // battery already sitting in `capacitor`: the drain is the payment. The alarm
   // colour is suppressed for the same reason -- an emptying bar here is the
   // reward being counted, not the warning it would be during play.
-  const shown = tallyTimer > 0 ? (tallyCharge * tallyTimer) / TALLY_FRAMES : capacitor;
+  const shown =
+    tallyTimer > 0 ? (tallyCharge * tallyTimer) / TALLY_FRAMES : capacitor;
   const ratio = shown / 100;
-  color("light_black");
+  color(meter.structure);
   rect(BAR.x - 1, BAR.y - 1, BAR.w + 2, BAR.h + 2);
   if (barFlash > 0) {
     barFlash--;
-    color(ticks % 4 < 2 ? "light_green" : "light_cyan");
+    color(ticks % 4 < 2 ? meter.charge : ink.energy);
   } else {
-    color(capacitor < 30 ? (ticks % 16 < 8 ? "red" : "light_red") : capacitor < 60 ? "yellow" : "green");
+    color(
+      capacitor < 30
+        ? meter.danger
+        : capacitor < 60
+          ? meter.warning
+          : meter.charge,
+    );
   }
   rect(BAR.x, BAR.y, Math.max(0, BAR.w * ratio), BAR.h);
-  color("light_cyan");
-  text("W" + wave + " " + currentFamily, 92, 10, { isSmallText: true });
-  text("x" + multiplier, 8, 10, { isSmallText: true });
-  color("light_red");
-  text("*".repeat(Math.max(0, lives)), 216, 10, { isSmallText: true });
+  color(ink.primary);
+  text("W" + wave + " " + currentFamily, hud.wave.x, hud.wave.y, {
+    isSmallText: true,
+  });
+  color(ink.rewardScore);
+  text("x" + multiplier, hud.multiplier.x, hud.multiplier.y, {
+    isSmallText: true,
+  });
+  drawLivesHud();
 
   // Quota meter. A quota only revealed at the surge would be a lottery: the
   // whole point is that the last ten seconds of a wave can be played
@@ -1087,19 +1639,83 @@ function drawHud() {
   // still time to fix it. It sits on the status row rather than under the
   // capacitor bar because the two are different quantities -- one is a level,
   // one is a total -- and stacking them invites reading one as the other.
-  // Growing marks against a shared target tick, with no track behind them: on
+  // Growing marks between paired boundary ticks, with no track behind them: on
   // this theme an empty track is a bright slab, and a bright slab above the
   // capacitor bar reads as a second capacitor sitting nearly empty. The tick is
-  // the only static part, and it is the finish line for both marks.
+  // the only static part. Matching marks at the origin and finish keep the
+  // finish tick beside the life icons from reading as the digit "1".
   const q = clamp(waveBanked / Math.max(1, waveQuota), 0, 1);
   const t = surgeTimer > 0 ? 0 : clamp(waveTimer / WAVE_FRAMES, 0, 1);
-  color("light_black");
-  rect(QUOTA_BAR.x + QUOTA_BAR.w, QUOTA_BAR.y, 1, CLOCK_BAR.y + CLOCK_BAR.h - QUOTA_BAR.y);
-  color(quotaMet ? (ticks % 8 < 4 ? "light_green" : "green") : q > 0.75 ? "light_yellow" : "yellow");
+  color(meter.structure);
+  const bounds = hud.waveMeterBounds;
+  rect(bounds.left, bounds.top, 1, bounds.bottom - bounds.top);
+  rect(bounds.right, bounds.top, 1, bounds.bottom - bounds.top);
+  color(quotaMet ? meter.charge : meter.warning);
   rect(QUOTA_BAR.x, QUOTA_BAR.y, Math.max(0, QUOTA_BAR.w * q), QUOTA_BAR.h);
   const last = !surgeTimer && waveTimer > WAVE_FRAMES - CLOCK_WARN_FRAMES;
-  color(last ? (ticks % 8 < 4 ? "cyan" : "blue") : "blue");
+  color(last ? (ticks % 8 < 4 ? ink.energy : meter.time) : meter.time);
   rect(CLOCK_BAR.x, CLOCK_BAR.y, Math.max(0, CLOCK_BAR.w * t), CLOCK_BAR.h);
+}
+
+/** Draw decorative Frame-A probes after all world collision work is complete. */
+function drawLivesHud() {
+  // `lives` includes the Probe currently in play. The HUD shows only reserve
+  // Probes, so three starting lives read as one active body plus two icons.
+  const count = Math.min(HUD_LIFE_ICONS, Math.max(0, lives - 1));
+  color(VISUAL.text.energy);
+  for (let i = 0; i < count; i++) {
+    const building = extendBuildTimer > 0 && i === count - 1;
+    if (building) {
+      const age = EXTEND_BUILD_FRAMES - extendBuildTimer;
+      const x = VISUAL.hud.lives.x + i * VISUAL.probe.hudGap;
+      // Terminal -> shell -> live current. The icon becomes a complete Probe
+      // only at the end, so the extra reserve is visibly manufactured.
+      color(age < 6 ? VISUAL.text.rewardScore : VISUAL.text.energy);
+      box(vec(x, VISUAL.hud.lives.y - 2), 2);
+      if (age >= 6) {
+        rect(x - 3, VISUAL.hud.lives.y - 1, 6, 1);
+        rect(x - 3, VISUAL.hud.lives.y + 2, 6, 1);
+        rect(x - 3, VISUAL.hud.lives.y - 1, 1, 4);
+        rect(x + 2, VISUAL.hud.lives.y - 1, 1, 4);
+      }
+      if (age >= 12)
+        box(vec(x + (ticks % 4 < 2 ? -1 : 1), VISUAL.hud.lives.y + 1), 1);
+      continue;
+    }
+    char(
+      PROBE_FRAME_A,
+      VISUAL.hud.lives.x + i * VISUAL.probe.hudGap,
+      VISUAL.hud.lives.y,
+      {
+        rotation: 0,
+        scale: { x: 1, y: 1 },
+      },
+    );
+  }
+  if (extendBuildTimer > 0) extendBuildTimer--;
+}
+
+/** Resolve the visual frame without changing the authoritative keeper state. */
+function probeFrameForKeeper() {
+  if (keeper.state === "ground") return PROBE_FRAME_B;
+  if (keeper.state === "recover") return PROBE_FRAME_A;
+  return Math.floor(ticks / PROBE_ANIMATION_FRAMES) % 2 === 0
+    ? PROBE_FRAME_A
+    : PROBE_FRAME_B;
+}
+
+function updateKeeperFacing(moveX, moveY) {
+  if (Math.abs(moveX) <= 0.001 && Math.abs(moveY) <= 0.001) return;
+  const vertical = moveY < -0.001 ? 0 : moveY > 0.001 ? 2 : null;
+  const horizontal = moveX > 0.001 ? 1 : moveX < -0.001 ? 3 : null;
+  if (vertical != null && horizontal != null) {
+    // A held diagonal keeps either compatible cardinal facing.  Entering a
+    // diagonal from an incompatible direction chooses its vertical axis once.
+    if (keeper.facing !== vertical && keeper.facing !== horizontal)
+      keeper.facing = vertical;
+  } else {
+    keeper.facing = vertical == null ? horizontal : vertical;
+  }
 }
 
 /* On this theme every `light_*` entry is its base colour at half brightness, not
@@ -1137,6 +1753,10 @@ function drawPieces() {
       // from a board that will still be pointing the same way in ten seconds.
       if (r.spin) arc(vec(r.x, r.y), 9, 1);
     }
+    if (r.restoreFlash > 0) {
+      color("light_cyan");
+      arc(vec(r.x, r.y), 9 + (12 - r.restoreFlash) * 0.5, 1);
+    }
     if (r.flash > 0) r.flash--;
   }
 }
@@ -1156,18 +1776,69 @@ function stepWorld(inp) {
   // absorbed, not threatening. It only lets a good read be nudged into a
   // catch, which is the part of the gesture worth rewarding.
   const speed =
-    keeper.state === "ground" ? GROUND_SPEED : keeper.state === "recover" ? RECOVER_SPEED : 1.25;
+    keeper.state === "ground"
+      ? GROUND_SPEED
+      : keeper.state === "recover"
+        ? RECOVER_SPEED
+        : 1.25;
+  const beforeX = keeper.x;
+  const beforeY = keeper.y;
   if (inp.left) keeper.x -= speed;
   if (inp.right) keeper.x += speed;
   if (inp.up) keeper.y -= speed;
   if (inp.down) keeper.y += speed;
   keeper.x = clamp(keeper.x, FIELD.left + 8, FIELD.right - 8);
   keeper.y = clamp(keeper.y, FIELD.top + 8, FIELD.bottom - 8);
+  const moveX = keeper.x - beforeX;
+  const moveY = keeper.y - beforeY;
+  const moving = Math.abs(moveX) + Math.abs(moveY) > 0.001;
+  if (moving) {
+    updateKeeperFacing(moveX, moveY);
+    const oldLen = Math.hypot(keeper.moveX, keeper.moveY);
+    const newLen = Math.hypot(moveX, moveY);
+    const changed =
+      !keeper.wasMoving ||
+      (oldLen > 0 &&
+        newLen > 0 &&
+        (keeper.moveX * moveX + keeper.moveY * moveY) / (oldLen * newLen) <
+          0.5);
+    keeper.moveX = moveX;
+    keeper.moveY = moveY;
+    keeper.moveFlash = 4;
+    keeper.stopFlash = 0;
+    if (changed) {
+      burst(keeper.x, keeper.y, "light_cyan", {
+        count: FEEL.moveBurst,
+        speed: 0.55,
+        angle: Math.atan2(-moveY, -moveX),
+        angleWidth: 0.6,
+      });
+    }
+  } else {
+    if (keeper.wasMoving) {
+      keeper.stopFlash = 5;
+      burst(keeper.x, keeper.y, "light_black", {
+        count: FEEL.moveBurst,
+        speed: 0.45,
+        angle: Math.atan2(keeper.moveY, keeper.moveX),
+        angleWidth: 1.0,
+      });
+    }
+    keeper.moveFlash = 0;
+  }
+  keeper.wasMoving = moving;
   if (keeper.state === "free" && inp.action && !surging) {
     keeper.state = "ground";
     keeper.timer = GROUND_FRAMES;
     groundAbsorbs = 0;
     capacitor -= 4;
+    keeper.groundFlash = 8;
+    burst(keeper.x, keeper.y, "cyan", {
+      count: FEEL.groundBurst,
+      speed: 1.3,
+      angle: 0,
+      angleWidth: PI * 2,
+    });
     audio.emit("keeper:ground");
   } else if (keeper.state === "ground") {
     keeper.timer--;
@@ -1214,8 +1885,25 @@ function stepWorld(inp) {
   // how the old rotors managed to turn 605 times a wave and still read as
   // nothing happening.
   for (const r of pieces) {
+    const disabled = r.disabledUntil > ticks;
+    if (r.wasDisabled && !disabled) {
+      r.wasDisabled = false;
+      r.restoreFlash = 12;
+      burst(r.x, r.y, "light_cyan", {
+        count: 6,
+        speed: 1.0,
+        angle: 0,
+        angleWidth: PI * 2,
+      });
+    } else if (disabled) {
+      r.wasDisabled = true;
+    }
+    if (r.restoreFlash > 0) r.restoreFlash--;
     if (r.kind !== "arrow" || !r.spin || r.disabledUntil > ticks) continue;
-    if (ticks > 0 && (ticks + Math.floor(r.phase * d.rotPeriod)) % d.rotPeriod === 0) {
+    if (
+      ticks > 0 &&
+      (ticks + Math.floor(r.phase * d.rotPeriod)) % d.rotPeriod === 0
+    ) {
       r.dir = (r.dir + r.spin + 4) % 4;
       r.flash = 10;
       audio.emit("arrow:turn");
@@ -1230,10 +1918,19 @@ function stepWorld(inp) {
   // already lethal on its own within ~36 seconds.
   const grounded = keeper.state === "ground";
   remove(scavengers, (s) => {
-    if (grounded && (s.x - keeper.x) ** 2 + (s.y - keeper.y) ** 2 <= RING_R * RING_R) {
+    if (
+      grounded &&
+      (s.x - keeper.x) ** 2 + (s.y - keeper.y) ** 2 <= RING_R * RING_R
+    ) {
       addEnergy(5, s.x, s.y);
       award(50 * multiplier, s.x, s.y);
       groundAbsorbs++;
+      burst(s.x, s.y, "light_green", {
+        count: FEEL.scavengerBurst,
+        speed: 1.7,
+        angle: 0,
+        angleWidth: PI * 2,
+      });
       audio.emit("minor:absorb");
       return true;
     }
@@ -1243,7 +1940,9 @@ function stepWorld(inp) {
     // off *gains* 8% score -- a bumper is a hazard that pays a little, so
     // removing one is a favour. An enemy whose effect is a favour is not an
     // enemy, so it eats the half of the terrain that is actually worth having.
-    const live = pieces.filter((r) => r.kind === "arrow" && r.disabledUntil <= ticks);
+    const live = pieces.filter(
+      (r) => r.kind === "arrow" && r.disabledUntil <= ticks,
+    );
     if (live.length === 0) return false;
     if (!s.target || s.target.disabledUntil > ticks) {
       let best = live[0];
@@ -1273,7 +1972,15 @@ function stepWorld(inp) {
     // is going in a second and a half unless you leave what you are doing".
     s.chew++;
     if (s.chew >= SCAV_CHEW_FRAMES) {
-      s.target.disabledUntil = ticks + SCAV_DISABLE_FRAMES;
+      const lost = s.target;
+      lost.disabledUntil = ticks + SCAV_DISABLE_FRAMES;
+      lost.wasDisabled = true;
+      burst(lost.x, lost.y, "red", {
+        count: FEEL.scavengerBurst,
+        speed: 1.4,
+        angle: 0,
+        angleWidth: PI * 2,
+      });
       s.target = null;
       s.chew = 0;
       audio.emit("scavenger:disable");
@@ -1297,13 +2004,39 @@ function stepWorld(inp) {
     // and it cannot kill. Anything else would be a spawn you cannot react to.
     if (s.immuneUntil && ticks < s.immuneUntil) continue;
     if (grounded) {
+      s.nearKeeper = false;
+      s.nearMinDist2 = Infinity;
       if (dist2 <= RING_R * RING_R) {
         absorbSpark(s, i);
         continue;
       }
-    } else if (keeper.invuln <= 0 && Math.abs(dx) <= 6 && Math.abs(dy) <= 6) {
-      loseLife("contact");
-      break;
+    } else {
+      if (keeper.invuln <= 0 && touchesKeeper(dx, dy)) {
+        loseLife("contact");
+        break;
+      }
+      const near2 = FEEL.nearRadius * FEEL.nearRadius;
+      if (keeper.invuln <= 0 && dist2 <= near2) {
+        s.nearKeeper = true;
+        s.nearMinDist2 = Math.min(
+          s.nearMinDist2 == null ? Infinity : s.nearMinDist2,
+          dist2,
+        );
+      } else if (s.nearKeeper) {
+        // Confirm only after the spark exits the proximity envelope. That
+        // keeps an approach that becomes a hit on the next frame from being
+        // falsely praised as a near miss.
+        nearMissFlash = 6;
+        nearMissAngle = Math.atan2(dy, dx);
+        burst(s.x, s.y, "light_black", {
+          count: 3,
+          speed: 0.65,
+          angle: Math.atan2(s.dy, s.dx),
+          angleWidth: 0.5,
+        });
+        s.nearKeeper = false;
+        s.nearMinDist2 = Infinity;
+      }
     }
   }
 
@@ -1324,7 +2057,7 @@ function stepWorld(inp) {
   if (capacitor <= 0 && !missPending) loseLife("capacitor");
 
   /* --- waves ----------------------------------------------------------- */
-  if (surgeTimer > 0) {
+  if (!missPending && surgeTimer > 0) {
     surgeTimer--;
     if (surgeTimer === 30) {
       // Layout is swapped only while every spark is frozen.
@@ -1337,38 +2070,23 @@ function stepWorld(inp) {
         const a = pieces.filter((r) => r.kind === "arrow")[0];
         const v = ARROW_DIRS[a.dir];
         sparks.push(
-          makeSpark(a.x + v.x * 9, a.y + v.y * 9, v, diff(wave).sparkSpeed, "spark", {
-            ignoreUntil: ticks + 6,
-          })
+          makeSpark(
+            a.x + v.x * 9,
+            a.y + v.y * 9,
+            v,
+            diff(wave).sparkSpeed,
+            "spark",
+            {
+              ignoreUntil: ticks + 6,
+            },
+          ),
         );
       }
     }
-  } else {
+  } else if (!missPending) {
     waveTimer++;
     if (waveTimer >= WAVE_FRAMES) {
-      waveTimer = 0;
-      // Wave clear cashes the capacitor out into score and drops in a fresh
-      // battery. That is what gives the resource an arc -- a wave opens from a
-      // known state and closes wherever play left it -- and it is the reason to
-      // arrive at the surge holding charge instead of coasting in on empty.
-      // The points are paid across the tally, not in one lump: the bar draining
-      // into the score is the only place the rule is ever stated.
-      tallyCharge = Math.max(0, capacitor);
-      waveBonus = Math.round(tallyCharge) * 20 * multiplier;
-      tallyPaid = 0;
-      tallyTimer = TALLY_FRAMES;
-      // The battery the wave earned. A short one is not a second punishment for
-      // a bad wave -- the payout has already been small -- it is the next wave
-      // starting from further back, which is the only currency this game has.
-      quotaCleared = quotaMet;
-      capacitor = quotaCleared ? WAVE_BATTERY : WAVE_BATTERY_SHORT;
-      barFlash = TALLY_FRAMES + 8;
-      wave++;
-      waveBanked = 0;
-      quotaMet = false;
-      waveQuota = quotaFor(wave);
-      surgeTimer = SURGE_FRAMES;
-      audio.emit("wave:surge");
+      completeWave();
     }
   }
 
@@ -1376,12 +2094,7 @@ function stepWorld(inp) {
   // Paid in installments so the score counts up with the bar draining, and the
   // remainder is settled on the last frame: the total has to be exactly the
   // bonus, not the sum of 36 roundings.
-  if (tallyTimer > 0) {
-    tallyTimer--;
-    const target = tallyTimer > 0 ? Math.round(waveBonus * (1 - tallyTimer / TALLY_FRAMES)) : waveBonus;
-    payScore(target - tallyPaid);
-    tallyPaid = target;
-  }
+  settleWaveBonus();
 
   for (const p of popups) p.life--;
   remove(popups, (p) => p.life <= 0);
@@ -1389,13 +2102,77 @@ function stepWorld(inp) {
 
 /* -------------------------------------------------------------------- draw */
 
+function drawNormalSpark(s, inert) {
+  // A three-beat electrical glyph inside the same 12x12 contact envelope used
+  // by the keeper collision check. The bright head is always downstream, while
+  // the short side discharge alternates sides; even in a still frame this is a
+  // directed, branching spark rather than a collectible-looking square.
+  const angle = Math.atan2(s.dy, s.dx);
+  const beat = (ticks + Math.floor(s.x + s.y)) % 3;
+  const branchSide = beat === 1 ? -1 : 1;
+  const px = -s.dy * branchSide;
+  const py = s.dx * branchSide;
+  const bx = s.x - s.dx + px;
+  const by = s.y - s.dy + py;
+  color(inert ? "light_black" : "yellow");
+  bar(vec(s.x, s.y), beat === 0 ? 8 : beat === 1 ? 10 : 9, 2, angle);
+  bar(vec(bx, by), beat === 2 ? 4 : 3, 1, angle + branchSide * PI * 0.36);
+  color(inert ? "light_black" : "light_yellow");
+  box(vec(s.x + s.dx * 4.5, s.y + s.dy * 4.5), beat === 1 ? 3 : 2);
+}
+
+function drawHeavySpark(s, inert) {
+  // A split-cell shell: its two cores disclose the payload before impact.
+  const angle = Math.atan2(s.dy, s.dx);
+  const nx = -s.dy;
+  const ny = s.dx;
+  color(inert ? "light_black" : "red");
+  bar(vec(s.x, s.y), 9, 3, angle);
+  color(inert ? "light_black" : "light_red");
+  box(vec(s.x + nx * 3, s.y + ny * 3), 3);
+  box(vec(s.x - nx * 3, s.y - ny * 3), 3);
+}
+
+function drawChargerSpark(s, inert) {
+  // A sharp leading needle plus a speed-scaled tail makes acceleration and
+  // travel direction readable without relying on hue.
+  const angle = Math.atan2(s.dy, s.dx);
+  color(inert ? "light_black" : "light_red");
+  bar(vec(s.x - s.dx * 2, s.y - s.dy * 2), 4 + s.speed * 3, 2, angle);
+  color(inert ? "light_black" : ticks % 6 < 3 ? "yellow" : "light_yellow");
+  box(vec(s.x + s.dx * 4, s.y + s.dy * 4), 3);
+}
+
+function portRotation(port) {
+  const dx = CX - port.x;
+  const dy = CY - port.y;
+  if (Math.abs(dx) >= Math.abs(dy)) return dx >= 0 ? 0 : 2;
+  return dy >= 0 ? 1 : 3;
+}
+
+function touchesKeeper(dx, dy) {
+  return Math.abs(dx) <= 6 && Math.abs(dy) <= 6;
+}
+
 function drawWorld() {
   drawField();
+  if (surgePulse > 0) {
+    // State-change vocabulary: one controlled field pulse, underneath all
+    // actors so it never hides the keeper, reward, or primary hazards.
+    const progress = 1 - surgePulse / 24;
+    color(surgePulse % 6 < 3 ? "light_green" : "green");
+    arc(vec(CX, CY), 12 + progress * 100, 1);
+    surgePulse--;
+  }
   drawPieces();
 
-  color("light_black");
   for (const p of pending) {
-    if (ticks % 8 < 4) box(vec(p.port.x, p.port.y), 5);
+    const remaining = p.at - ticks;
+    const charged = remaining <= 16;
+    color(charged ? (ticks % 4 < 2 ? "red" : "light_red") : "light_black");
+    char(charged ? PORT_FRAME_CHARGED : PORT_FRAME_IDLE, p.port.x, p.port.y, {
+      rotation: portRotation(p.port),
+    });
   }
   for (const s of scavengers) {
     if (s.chew > 0) {
@@ -1413,7 +2190,7 @@ function drawWorld() {
         13,
         2,
         -PI / 2,
-        -PI / 2 + (PI * 2 * (SCAV_CHEW_FRAMES - s.chew)) / SCAV_CHEW_FRAMES
+        -PI / 2 + (PI * 2 * (SCAV_CHEW_FRAMES - s.chew)) / SCAV_CHEW_FRAMES,
       );
     } else {
       color("purple");
@@ -1425,21 +2202,11 @@ function drawWorld() {
   for (const s of sparks) {
     const inert = s.immuneUntil && ticks < s.immuneUntil;
     if (s.type === "heavy") {
-      // Hollow shell with two cores: what it splits into is drawn on it.
-      color(inert ? "light_black" : "red");
-      arc(vec(s.x, s.y), 6, 2);
-      color(inert ? "light_black" : "light_red");
-      box(vec(s.x - 2.5, s.y), 2);
-      box(vec(s.x + 2.5, s.y), 2);
+      drawHeavySpark(s, inert);
     } else if (s.type === "charger") {
-      // The streak grows with speed, so its acceleration is visible directly.
-      color("light_red");
-      bar(vec(s.x, s.y), 4 + s.speed * 4, 3, Math.atan2(s.dy, s.dx));
-      color(ticks % 6 < 3 ? "light_yellow" : "light_red");
-      box(vec(s.x, s.y), 4);
+      drawChargerSpark(s, inert);
     } else {
-      color(inert ? "light_black" : "yellow");
-      box(vec(s.x, s.y), 6);
+      drawNormalSpark(s, inert);
     }
     // The volt ring. Which spark is worth crossing the field for has to be
     // legible before the decision, not after it, so worth is drawn as an aura
@@ -1450,12 +2217,61 @@ function drawWorld() {
       color("cyan");
       arc(vec(s.x, s.y), 7 + bonus * 5, 1);
     }
+    if (s.spawnFlash > 0) {
+      color(s.spawnFlash % 4 < 2 ? "red" : "light_red");
+      arc(vec(s.x, s.y), 7 + (10 - s.spawnFlash) * 0.5, 1);
+      s.spawnFlash--;
+    }
   }
-  // The keeper is gone once the last life is spent: loseLife() blows it up and
-  // then re-centres it for a respawn that, at zero lives, never comes. Drawing
-  // it through the ceremony contradicts the explosion the player just watched
-  // and puts a live-looking keeper under the words GAME OVER.
-  if (phase !== "gameover" && (keeper.invuln <= 0 || ticks % 8 < 4)) {
+  // loseLife() re-centres the keeper immediately so the next PLAY frame has a
+  // safe respawn position. That authoritative reset must not leak through the
+  // MISS ceremony: showing it there makes the next life look present before
+  // the miss beat is over. MISS and GAME OVER both suppress the live silhouette;
+  // it returns on the first PLAY/READY frame that owns the respawn.
+  if (
+    phase !== "miss" &&
+    phase !== "gameover" &&
+    (keeper.invuln <= 0 || ticks % 8 < 4)
+  ) {
+    if (
+      keeper.moveFlash > 0 &&
+      Math.hypot(keeper.moveX, keeper.moveY) > 0.001
+    ) {
+      const a = Math.atan2(keeper.moveY, keeper.moveX);
+      const ux = Math.cos(a);
+      const uy = Math.sin(a);
+      color("light_cyan");
+      bar(vec(keeper.x - ux * 9, keeper.y - uy * 9), 5, 2, a);
+      keeper.moveFlash--;
+    }
+    if (keeper.stopFlash > 0) {
+      color("light_black");
+      arc(vec(keeper.x, keeper.y), 7 + (5 - keeper.stopFlash), 1);
+      keeper.stopFlash--;
+    }
+    if (nearMissFlash > 0) {
+      // A neutral silver bracket, deliberately weaker and less colourful than
+      // absorb reward glints. It marks the path that just missed without
+      // implying energy, score, or safety.
+      color("light_black");
+      arc(
+        vec(keeper.x, keeper.y),
+        15,
+        2,
+        nearMissAngle - 0.38,
+        nearMissAngle + 0.38,
+      );
+      nearMissFlash--;
+    }
+    if (keeper.groundFlash > 0) {
+      color("light_cyan");
+      arc(
+        vec(keeper.x, keeper.y),
+        RING_R + 2 + (8 - keeper.groundFlash) * 1.25,
+        1,
+      );
+      keeper.groundFlash--;
+    }
     if (keeper.state === "ground") {
       // Full circle = the catch radius, which must always read as an area. It
       // was drawn in `light_cyan`, which on this theme is cyan at half
@@ -1469,21 +2285,46 @@ function drawWorld() {
       // language as the recovery arc, so both halves of the commitment are
       // read the same way.
       color("cyan");
-      arc(vec(keeper.x, keeper.y), 10, 2, -PI / 2, -PI / 2 + (PI * 2 * keeper.timer) / GROUND_FRAMES);
+      arc(
+        vec(keeper.x, keeper.y),
+        10,
+        2,
+        -PI / 2,
+        -PI / 2 + (PI * 2 * keeper.timer) / GROUND_FRAMES,
+      );
       if (groundAbsorbs > 0) {
-        color("light_yellow");
-        text("x" + groundAbsorbs, keeper.x - 4, keeper.y - RING_R - 4, { isSmallText: true });
+        color(VISUAL.text.rewardScore);
+        text("x" + groundAbsorbs, keeper.x - 4, keeper.y - RING_R - 4, {
+          isSmallText: true,
+        });
       }
       color("cyan");
+      char(PROBE_FRAME_B, keeper.x, keeper.y, {
+        rotation: keeper.facing,
+        scale: { x: 2, y: 2 },
+      });
     } else if (keeper.state === "recover") {
       // Countdown arc: the commitment has a visible, finite end.
       color("purple");
-      arc(vec(keeper.x, keeper.y), 10, 2, -PI / 2, -PI / 2 + (PI * 2 * keeper.timer) / RECOVER_FRAMES);
+      arc(
+        vec(keeper.x, keeper.y),
+        10,
+        2,
+        -PI / 2,
+        -PI / 2 + (PI * 2 * keeper.timer) / RECOVER_FRAMES,
+      );
       color("purple");
+      char(PROBE_FRAME_A, keeper.x, keeper.y, {
+        rotation: keeper.facing,
+        scale: { x: 2, y: 2 },
+      });
     } else {
       color("cyan");
+      char(probeFrameForKeeper(), keeper.x, keeper.y, {
+        rotation: keeper.facing,
+        scale: { x: 2, y: 2 },
+      });
     }
-    box(vec(keeper.x, keeper.y), 12);
   }
   if (surgeTimer > 0) {
     // The freeze exists because a layout must never change under a spark in
@@ -1493,45 +2334,49 @@ function drawWorld() {
     // lines to read, the two that carry the payout and the quota are exactly
     // the ones a keeper parked at the centre used to sit on.
     const top = keeper.y > CY ? 64 : 148;
-    centered("WAVE " + wave, top, "light_cyan");
-    centered("FIELD REBUILD : " + currentFamily, top + 12, "yellow");
+    centered("WAVE " + wave, top, VISUAL.text.primary);
+    centered("FIELD REBUILD : " + currentFamily, top + 12, VISUAL.text.warning);
     // Counts up in step with the bar draining, so the two halves of the rule --
     // charge leaves, score arrives -- are one movement rather than two numbers
     // that happen to match.
-    centered("CHARGE BONUS " + tallyPaid, top + 24, ticks % 8 < 4 ? "light_green" : "green");
+    centered("CHARGE BONUS " + tallyPaid, top + 24, VISUAL.text.reward);
     // Say what the quota bought, in the units the player just watched fill.
     centered(
-      quotaCleared ? "QUOTA MET : BATTERY " + WAVE_BATTERY : "QUOTA MISSED : BATTERY " + WAVE_BATTERY_SHORT,
+      quotaCleared
+        ? "QUOTA MET : BATTERY " + WAVE_BATTERY
+        : "QUOTA MISSED : BATTERY " + WAVE_BATTERY_SHORT,
       top + 36,
-      quotaCleared ? "light_cyan" : "light_red"
+      quotaCleared ? VISUAL.text.reward : VISUAL.text.danger,
     );
   }
-  for (const p of popups) {
+  // Demo scoring still exercises the real economy, but its floating numbers do
+  // not compete with the cabinet logo and instructions on ATTRACT.
+  for (const p of phase === "attract" ? [] : popups) {
     color(
       p.kind === "energy"
         ? "green"
         : p.kind === "quota"
-        ? ticks % 6 < 3
-          ? "light_cyan"
-          : "cyan"
-        : p.kind === "overcharge"
-        ? // On the bar's own flash period, not the popups' -- the word and the
-          // bar it is about pulse together, so they read as one event rather
-          // than two things that happen to be lit. This is what buys the link
-          // to the gauge; the word itself cannot go *in* the gauge, which is
-          // six pixels tall and full of green at exactly this moment.
-          ticks % 4 < 2
-          ? "light_yellow"
-          : "yellow"
-        : p.kind === "loss"
-        ? "light_red"
-        : "light_yellow"
+          ? VISUAL.text.reward
+          : p.kind === "overcharge"
+            ? // On the bar's own flash period, not the popups' -- the word and the
+              // bar it is about pulse together, so they read as one event rather
+              // than two things that happen to be lit. This is what buys the link
+              // to the gauge; the word itself cannot go *in* the gauge, which is
+              // six pixels tall and full of green at exactly this moment.
+              ticks % 4 < 2
+              ? VISUAL.text.rewardScore
+              : VISUAL.text.warning
+            : p.kind === "loss"
+              ? VISUAL.text.danger
+              : VISUAL.text.rewardScore,
     );
     if (p.banner) {
       text(p.text, p.x - p.text.length * 2, p.y, { isSmallText: true });
     } else {
       const rise = p.kind === "energy" ? 0.5 : 0.25;
-      text(p.text, p.x - p.text.length * 2, p.y - 6 - (48 - p.life) * rise, { isSmallText: true });
+      text(p.text, p.x - p.text.length * 2, p.y - 6 - (48 - p.life) * rise, {
+        isSmallText: true,
+      });
     }
   }
 }
@@ -1541,7 +2386,7 @@ function drawWorld() {
  * as a near-white slab that blanks the playfield, and there is no palette
  * entry darker than the background. */
 function rules(y, h) {
-  color("light_black");
+  color(VISUAL.instrument.structure);
   rect(0, y, 256, 1);
   rect(0, y + h - 1, 256, 1);
 }
@@ -1551,31 +2396,101 @@ function centered(s, y, c) {
   text(s, 128 - s.length * 2, y, { isSmallText: true });
 }
 
+function titleBolt(x, y, mirror) {
+  // Code-native logo mark: typography stays exact and searchable while the
+  // paired circuit bolts supply identity without trusting generated lettering.
+  color(VISUAL.text.rewardScore);
+  const m = mirror ? -1 : 1;
+  line(vec(x, y - 7), vec(x + 3 * m, y - 2), 2);
+  line(vec(x + 3 * m, y - 2), vec(x, y + 1), 2);
+  line(vec(x, y + 1), vec(x + 4 * m, y + 7), 2);
+}
+
+const TITLE_PIXELS = {
+  V: ["10001", "10001", "10001", "10001", "01010", "01010", "00100"],
+  O: ["01110", "10001", "10001", "10101", "10001", "10001", "01110"],
+  L: ["10000", "10000", "10000", "10000", "10000", "10000", "11111"],
+  T: ["11111", "00100", "00100", "00100", "00100", "00100", "00100"],
+};
+
+function drawPixelTitle() {
+  const word = "VOLT";
+  const scale = 2;
+  const gap = 2;
+  const width = word.length * 5 * scale + (word.length - 1) * gap;
+  const left = Math.floor((256 - width) / 2);
+  const liveColumn = Math.floor(ticks / 4) % (word.length * 6);
+  for (let letter = 0; letter < word.length; letter++) {
+    const rows = TITLE_PIXELS[word[letter]];
+    for (let y = 0; y < rows.length; y++) {
+      for (let x = 0; x < rows[y].length; x++) {
+        if (rows[y][x] !== "1") continue;
+        color(
+          letter * 6 + x === liveColumn
+            ? VISUAL.text.energy
+            : VISUAL.text.rewardScore,
+        );
+        rect(
+          left + letter * (10 + gap) + x * scale,
+          68 + y * scale,
+          scale,
+          scale,
+        );
+      }
+    }
+  }
+  // Capacitor plates beneath the O collect the travelling current.
+  const ox = left + 12 + 5;
+  color(ticks % 16 < 8 ? VISUAL.text.energy : VISUAL.instrument.structure);
+  rect(ox - 4, 84, 3, 1);
+  rect(ox + 1, 84, 3, 1);
+}
+
 function drawOverlay() {
   if (phase === "attract") {
-    rules(74, 42);
-    centered("V O L T   K E E P E R", 84, "light_cyan");
+    rules(62, 62);
+    titleBolt(72, 76, false);
+    titleBolt(184, 76, true);
+    drawPixelTitle();
+    centered("KEEPER", 88, VISUAL.text.primary);
     const cards = [
       "GROUND YOURSELF ON THE SPARKS",
       "SPARKS ARE THE ONLY ENERGY",
       "RUN AWAY AND THE CAPACITOR DIES",
     ];
-    centered(cards[attractCard % cards.length], 98, "light_yellow");
+    centered(cards[attractCard % cards.length], 108, VISUAL.text.warning);
     rules(150, 14);
-    if (ticks % 60 < 40) centered("PUSH Z TO START", 156, "cyan");
-    centered("DEMO PLAY", 214, "light_black");
+    if (ticks % 60 < 40) centered("PUSH Z TO START", 156, VISUAL.text.energy);
+    centered("DEMO PLAY", 214, VISUAL.text.secondary);
   } else if (phase === "ready") {
-    rules(104, 30);
-    centered("WAVE " + wave, 110, "light_cyan");
-    centered("READY", 122, "yellow");
+    // The keeper respawns at screen centre. Keep the ceremony above it so the
+    // word READY and the live player silhouette never merge into one glyph.
+    rules(62, 30);
+    centered("WAVE " + wave, 68, VISUAL.text.primary);
+    centered("READY", 80, VISUAL.text.warning);
   } else if (phase === "miss") {
     rules(110, 16);
-    centered("MISS", 116, "light_red");
+    centered("MISS", 116, VISUAL.text.danger);
+  } else if (phase === "finalclear") {
+    const top = keeper.y > CY ? 50 : 140;
+    rules(top - 10, 76);
+    centered("VOLT KEEPER CLEAR", top, VISUAL.text.rewardScore);
+    centered("ALL 17 WAVES COMPLETE", top + 14, VISUAL.text.primary);
+    centered("FINAL SCORE " + pad7(gameScore), top + 30, VISUAL.text.energy);
+    if (gameScore >= hiScore && gameScore > 0)
+      centered("NEW RECORD", top + 44, VISUAL.text.rewardScore);
+    if (
+      phaseTimer < FINAL_CLEAR_FRAMES - CEREMONY_INPUT_GRACE &&
+      ticks % 60 < 40
+    ) {
+      centered("PUSH Z FOR ATTRACT", top + 56, VISUAL.text.secondary);
+    }
   } else if (phase === "gameover") {
     rules(96, 46);
-    centered("GAME OVER", 104, "light_red");
-    centered("SCORE " + pad7(gameScore), 118, "light_cyan");
-    if (gameScore >= hiScore && gameScore > 0) centered("NEW RECORD", 130, "yellow");
+    centered("GAME OVER", 104, VISUAL.text.danger);
+    centered("SCORE " + pad7(gameScore), 118, VISUAL.text.energy);
+    if (gameScore >= hiScore && gameScore > 0)
+      centered("NEW RECORD", 130, VISUAL.text.rewardScore);
   }
 }
 
@@ -1595,7 +2510,13 @@ function readInput() {
  * arrives, and backs away from everything while recovering. It plays the same
  * game through the same stepWorld() the player drives. */
 function demoInput() {
-  const inp = { left: false, right: false, up: false, down: false, action: false };
+  const inp = {
+    left: false,
+    right: false,
+    up: false,
+    down: false,
+    action: false,
+  };
   if (!sparks.length) return inp;
   let best = null; // smallest predicted closest approach
   let danger = null;
@@ -1610,9 +2531,13 @@ function demoInput() {
     }
     const vx = sp.dx * sp.speed;
     const vy = sp.dy * sp.speed;
-    const t = Math.max(0, -(rx * vx + ry * vy) / Math.max(1e-6, vx * vx + vy * vy));
+    const t = Math.max(
+      0,
+      -(rx * vx + ry * vy) / Math.max(1e-6, vx * vx + vy * vy),
+    );
     const miss = Math.hypot(rx + vx * t, ry + vy * t);
-    if (!best || miss < best.miss) best = { sp, t, miss, ix: sp.x + vx * t, iy: sp.y + vy * t };
+    if (!best || miss < best.miss)
+      best = { sp, t, miss, ix: sp.x + vx * t, iy: sp.y + vy * t };
   }
   const goTo = (x, y) => {
     if (x < keeper.x - 2) inp.left = true;
@@ -1627,7 +2552,10 @@ function demoInput() {
   } else {
     // No shot lined up: keep repositioning toward where a spark will pass, so
     // attract mode is never a stationary keeper watching sparks go by.
-    goTo(clamp(best.ix, FIELD.left + 12, FIELD.right - 12), clamp(best.iy, FIELD.top + 12, FIELD.bottom - 12));
+    goTo(
+      clamp(best.ix, FIELD.left + 12, FIELD.right - 12),
+      clamp(best.iy, FIELD.top + 12, FIELD.bottom - 12),
+    );
   }
   return inp;
 }
@@ -1637,6 +2565,11 @@ function update() {
   const starting = phase === "attract" && actionPressed();
   setupAudio(phase !== "attract" || starting);
   if (audio.bus) audio.bus.beginFrame(ticks, phase === "attract");
+  if (injectedScorePending > 0) {
+    const points = injectedScorePending;
+    injectedScorePending = 0;
+    payScore(points);
+  }
 
   if (phase === "attract") {
     phaseTimer++;
@@ -1652,7 +2585,10 @@ function update() {
     if (phaseTimer <= 0) phase = "play";
   } else if (phase === "play") {
     stepWorld(readInput());
-    if (missPending) {
+    // stepWorld can enter a clear ceremony. Re-check the phase before applying
+    // any later same-frame transition so a wave boundary and a miss cannot both
+    // own the same frame.
+    if (phase === "play" && missPending) {
       missPending = false;
       if (lives <= 0) {
         phase = "gameover";
@@ -1668,11 +2604,32 @@ function update() {
   } else if (phase === "miss") {
     phaseTimer--;
     if (phaseTimer <= 0) phase = "play";
+  } else if (phase === "finalclear") {
+    phaseTimer--;
+    settleWaveBonus();
+    if (tallyTimer <= 0 && !finalScoreSaved) {
+      saveHiScore();
+      finalScoreSaved = true;
+    }
+    if (
+      phaseTimer <= 0 ||
+      (actionPressed() &&
+        phaseTimer < FINAL_CLEAR_FRAMES - CEREMONY_INPUT_GRACE)
+    ) {
+      // The grace period is longer than the tally, so a legal skip cannot drop
+      // score. Keeping this settlement guard makes the invariant explicit.
+      while (tallyTimer > 0) settleWaveBonus();
+      if (!finalScoreSaved) saveHiScore();
+      boot();
+    }
   } else if (phase === "gameover") {
     phaseTimer--;
     // Any input skips the rest of the ceremony, but never starts a run from
     // the same press: attract owns the start input.
-    if (phaseTimer <= 0 || (actionPressed() && phaseTimer < GAMEOVER_FRAMES - 60)) {
+    if (
+      phaseTimer <= 0 ||
+      (actionPressed() && phaseTimer < GAMEOVER_FRAMES - 60)
+    ) {
       boot();
     }
   }
@@ -1683,7 +2640,10 @@ function update() {
 
   if (audio.bus) {
     audio.bus.setIntent(1 - Math.max(0, capacitor) / 100);
-    if (audio.ready && (phase === "play" || phase === "ready" || phase === "miss")) {
+    if (
+      audio.ready &&
+      (phase === "play" || phase === "ready" || phase === "miss")
+    ) {
       audio.emit("bgm:" + audio.bus.desiredCue());
     }
     audio.bus.endFrame();
@@ -1695,17 +2655,62 @@ function update() {
 if (typeof window !== "undefined") {
   window.__voltKeeper = {
     audio,
+    visualContract: () => JSON.parse(JSON.stringify(VISUAL)),
     state: () => ({
       phase,
+      phaseTimer,
       wave,
+      waveTimer,
+      waveQuota,
+      waveBanked,
+      quotaMet,
+      quotaCleared,
+      tallyTimer,
+      tallyPaid,
+      waveBonus,
+      surgeTimer,
       capacitor,
       multiplier,
+      multTimer,
       lives,
+      scavTimer,
+      warnTimer,
       score: gameScore,
       hiScore,
+      popups,
       currentFamily,
       sparks: sparks ? sparks.length : 0,
+      sparkSamples: sparks
+        ? sparks.map((s) => ({
+            x: s.x,
+            y: s.y,
+            dx: s.dx,
+            dy: s.dy,
+            speed: s.speed,
+            type: s.type,
+          }))
+        : [],
+      keeper: keeper
+        ? {
+            x: keeper.x,
+            y: keeper.y,
+            state: keeper.state,
+            timer: keeper.timer,
+            invuln: keeper.invuln,
+            facing: keeper.facing,
+            frame: probeFrameForKeeper(),
+          }
+        : null,
+      groundAbsorbs,
+      extendCount,
+      extendBuildTimer,
+      nextExtend: nextExtendThreshold(extendCount),
+      finalScoreSaved,
+      feedback: { nearMissFlash, impactFlash, surgePulse },
     }),
+    campaign: () => JSON.parse(JSON.stringify(CAMPAIGN)),
+    injectWaveEnd,
+    injectScore,
   };
 }
 
@@ -1724,10 +2729,41 @@ if (typeof __VK_TEST__ !== "undefined") {
     dirToward,
     snapDir,
     sparkBonus,
+    makeSpark,
+    absorbSpark,
+    burst,
     diff,
+    FEEL,
+    VISUAL,
+    PROBE_FRAME_A,
+    PROBE_FRAME_B,
+    PROBE_ANIMATION_FRAMES,
+    PORT_FRAME_IDLE,
+    PORT_FRAME_CHARGED,
+    EXTEND_BUILD_FRAMES,
+    CAMPAIGN,
+    EARLY_EXTEND_THRESHOLDS,
+    REPEATING_EXTEND_START,
+    REPEATING_EXTEND_INTERVAL,
+    nextExtendThreshold,
+    extendCountForScore,
+    MAX_LIVES,
     buildLayout,
     deflectSpark,
     bounceWalls,
+    drawNormalSpark,
+    drawHeavySpark,
+    drawChargerSpark,
+    portRotation,
+    drawPixelTitle,
+    touchesKeeper,
+    drawLivesHud,
+    probeFrameForKeeper,
+    injectWaveEnd,
+    injectScore,
+    payScore,
+    loseLife,
+    startRun,
     // The attract pilot, so a gameplay test can be driven by the same policy
     // every balance figure is measured with instead of a weaker ad-hoc one. It
     // reads state and returns an input; it never writes.
@@ -1739,6 +2775,9 @@ if (typeof __VK_TEST__ !== "undefined") {
     setWave: (w) => {
       wave = w;
     },
+    setLives: (value) => {
+      lives = clamp(Math.floor(value), 0, MAX_LIVES);
+    },
     audioLog: () => (audio.bus ? audio.bus.log : []),
     state: () => ({
       keeper,
@@ -1747,6 +2786,7 @@ if (typeof __VK_TEST__ !== "undefined") {
       pieces,
       capacitor,
       multiplier,
+      multTimer,
       lives,
       wave,
       currentFamily,
@@ -1760,11 +2800,18 @@ if (typeof __VK_TEST__ !== "undefined") {
       tallyCharge,
       tallyPaid,
       pending,
+      scavTimer,
+      warnTimer,
       phase,
       phaseTimer,
       gameScore,
       hiScore,
       popups,
+      extendCount,
+      extendBuildTimer,
+      nextExtend: nextExtendThreshold(extendCount),
+      finalScoreSaved,
+      feedback: { nearMissFlash, nearMissAngle, impactFlash, surgePulse },
     }),
   });
 }

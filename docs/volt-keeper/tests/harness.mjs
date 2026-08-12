@@ -46,6 +46,7 @@ export function loadGame(options = {}) {
   };
 
   const adapter = VKBus.createMockAdapter();
+  const storage = new Map();
   const scores = [];
   const particles = [];
   const draws = [];
@@ -82,6 +83,11 @@ export function loadGame(options = {}) {
     Number,
     Infinity,
     console,
+    localStorage: {
+      getItem: (key) => (storage.has(key) ? storage.get(key) : null),
+      setItem: (key, value) => storage.set(key, String(value)),
+      removeItem: (key) => storage.delete(key),
+    },
     // library helpers
     vec: (x, y) => ({ x, y }),
     rnd: (a, b) => (a == null ? nextRandom() : b == null ? nextRandom() * a : a + nextRandom() * (b - a)),
@@ -105,8 +111,15 @@ export function loadGame(options = {}) {
       draw("arc", { x: pos.x, y: pos.y, radius, thickness, angleFrom, angleTo }),
     line: (a, b, thickness) => draw("line", { x: a.x, y: a.y, x2: b.x, y2: b.y, thickness }),
     text: (s, x, y) => draw("text", { text: s, x, y }),
-    char: (s, x, y) => draw("char", { text: s, x, y }),
-    particle: (pos, opts) => particles.push({ pos, opts }),
+    char: (s, x, y, opts = {}) =>
+      draw("char", {
+        text: s,
+        x,
+        y,
+        rotation: opts.rotation == null ? 0 : opts.rotation,
+        scale: Object.assign({ x: 1, y: 1 }, opts.scale || {}),
+      }),
+    particle: (pos, opts) => particles.push({ pos, opts, color: currentColor }),
     addScore: (points, x, y) => scores.push({ points, x, y }),
     end: () => { endCalled++; },
     ticks: 0,
